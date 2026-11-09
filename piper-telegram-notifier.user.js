@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Piper Telegram Notifier
 // @namespace    https://github.com/nkorim321-creator/android-apk
-// @version      2.2.0
+// @version      2.3.0
 // @description  Piper dashboard e notun survey (hit) available hole Telegram e title, pay ar time pathay.
 // @match        https://www.piperpays.com/*
 // @match        https://piperpays.com/*
@@ -36,7 +36,9 @@
       return old ? [{ id: String(old), name: '' }] : [];
     },
     set chats(list) { GM_setValue('chats', list); },
-    get intervalSec() { return Math.max(30, Number(GM_getValue('intervalSec', 60)) || 60); },
+    // Protibar check er majhe random somoy: minSec theke maxSec er moddhe je kono second.
+    get minSec() { return Math.max(30, Number(GM_getValue('minSec', 60)) || 60); },
+    get maxSec() { return Math.max(this.minSec, Number(GM_getValue('maxSec', 300)) || 300); },
     get desktopNotify() { return GM_getValue('desktopNotify', true); },
   };
 
@@ -226,6 +228,7 @@
   // Main check
   // ---------------------------------------------------------------------------
   let busy = false;
+  let reloadOnNextTick = false;
   let lastResult = 'ekhono check hoy nai';
 
   function reloadForLogin() {
@@ -299,10 +302,8 @@
         GM_setValue('seenIds', Array.from(seen).slice(-MAX_SEEN));
       }
 
-      // Page theke porle page ta purono thakte pare, tai porer check er age reload kori.
-      if (source === 'page') {
-        setTimeout(() => location.reload(), Math.max(10000, cfg.intervalSec * 1000 - 8000));
-      }
+      // Page theke porle page ta purono thakte pare, tai porer random somoy e reload kori.
+      reloadOnNextTick = source === 'page';
 
       const time = new Date().toLocaleTimeString();
       status(`watching (${source}) · ${list.length} available · ${fresh.length} pathano · ${time}`);
@@ -365,9 +366,17 @@
     cfg.chats = v.split(',').map((x) => x.trim()).filter(Boolean).map((id) => old.get(id) || { id, name: '' });
     status('Chat list saved: ' + cfg.chats.length + ' jon');
   });
-  GM_registerMenuCommand('Check interval (seconds) bodlao', () => {
-    const v = prompt('Koto second por por check korbe? (minimum 30)', String(cfg.intervalSec));
-    if (v !== null) { GM_setValue('intervalSec', Number(v) || 60); location.reload(); }
+  GM_registerMenuCommand('Random check time bodlao (minute)', () => {
+    const cur = (cfg.minSec / 60) + '-' + (cfg.maxSec / 60);
+    const v = prompt('Koto minute er moddhe random check korbe? "kom-beshi" lekho, jemon 1-5.\n(Minimum 0.5 minute)', cur);
+    if (v === null) return;
+    const m = v.replace(/\s/g, '').match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
+    if (!m) { alert('Bujhte pari nai. Emon lekho: 1-5'); return; }
+    const a = Math.round(Number(m[1]) * 60), b = Math.round(Number(m[2]) * 60);
+    GM_setValue('minSec', Math.max(30, Math.min(a, b)));
+    GM_setValue('maxSec', Math.max(30, Math.max(a, b)));
+    alert('Ekhon theke ' + (cfg.minSec / 60) + ' theke ' + (cfg.maxSec / 60) + ' minute er moddhe random somoy e check hobe.');
+    scheduleNext();
   });
   GM_registerMenuCommand('Desktop notification on/off', () => {
     GM_setValue('desktopNotify', !cfg.desktopNotify);
@@ -383,6 +392,25 @@
     setTimeout(() => status('shuru hocche...'), 500);
   }
 
-  setTimeout(check, 4000);
-  setInterval(check, cfg.intervalSec * 1000);
+  // Fixed interval er bodole protibar notun random somoy. Second er sathe millisecond o random.
+  let timer = null;
+  function randomDelayMs() {
+    const min = cfg.minSec * 1000, max = cfg.maxSec * 1000;
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+  function scheduleNext() {
+    clearTimeout(timer);
+    const delay = randomDelayMs();
+    const at = new Date(Date.now() + delay).toLocaleTimeString();
+    timer = setTimeout(tick, delay);
+    if (pill) pill.textContent = pill.textContent.replace(/ · porer .*$/, '') + ' · porer ' + (reloadOnNextTick ? 'reload' : 'check') + ' ' + at;
+  }
+  async function tick() {
+    if (reloadOnNextTick) { location.reload(); return; }
+    await check();
+    scheduleNext();
+  }
+
+  // Page khular por o ekta random chhoto deri (3-9 second), tarpor prothom check.
+  setTimeout(tick, 3000 + Math.floor(Math.random() * 6000));
 })();

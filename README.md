@@ -17,7 +17,8 @@ Niche ekta **Dashboard kholo** button o thake.
 ## Kivabe kaj kore
 
 - Piper er dashboard nije `https://api.piperpays.com/campaigns?status=all` theke survey list ane.
-- Ei script tomar login kora browser tab theke same list protiti 60 second e check kore.
+- Ei script tomar login kora browser tab theke same list check kore.
+- Check er kono fixed somoy nai. Protibar 1 theke 5 minute er moddhe random somoy e check hoy.
 - API kaj na korle dashboard page er survey card theke title, dollar ar minute pore ney.
 - `ASSIGNED` status er survey mane "Available" tab er survey.
 - Notun survey pele tomar nijer Telegram bot diye tomake message pathay.
@@ -82,8 +83,8 @@ Eta dekhle bujhbe script cholche.
 |---|---|
 | Telegram bot | Free. Ek chat e second e 1 ta, group e minute e 20 ta message. Ei script er jonno ei limit kokhono lagbe na. |
 | Koto jon ke pathano jay | Kono fixed limit nai. 2-3 jon kono somossa na. |
-| Check | Default 60 second e ekbar, din e 1440 bar. Minimum 30 second. |
-| Piper API | Piper kono limit lekhe nai. Interval 30 second er niche na namano bhalo. |
+| Check | Protibar 1-5 minute er moddhe random somoy e, ghontay mot 20 er moto. Menu theke **Random check time bodlao** diye range bodlano jay, jemon `2-6`. Minimum 0.5 minute. |
+| Piper API | Piper kono limit lekhe nai. Random somoy dile pattern dhora kothin hoy, kintu puropuri lukano jay na. |
 | Seen list | Shesh 1000 ta survey mone rakhe. |
 
 Asol limit holo **PC ar dashboard tab chalu thakte hobe**. PC bondho, sleep ba tab bondho thakle check hoy na.
@@ -99,6 +100,7 @@ Asol limit holo **PC ar dashboard tab chalu thakte hobe**. PC bondho, sleep ba t
 
 - **Dashboard tab khola rakhte hobe.** Tab bondho korle ba PC sleep e gele check bondho thakbe.
 - Chrome er **Memory Saver** e `piperpays.com` ke "Always keep these sites active" e add koro. Na hole Chrome tab ta ghum pariye dite pare.
-- Tab background e thakle o kaj kore, minute e ekbar check hoy.
-- Menu theke check interval bodlano jay. Minimum 30 second.
+- Tab background e thakle o kaj kore.
+- Page er niche label e porer check kokhon hobe seta dekhay.
+- Random somoy er karone notun survey er message ashte 1-5 minute deri hote pare.
 - Script tomar Piper password ba token kothao pathay na. Shudhu survey er title, pay ar time Telegram e jay.
