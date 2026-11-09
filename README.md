@@ -18,6 +18,7 @@ Niche ekta **Dashboard kholo** button o thake.
 
 - Piper er dashboard nije `https://api.piperpays.com/campaigns?status=all` theke survey list ane.
 - Ei script tomar login kora browser tab theke same list protiti 60 second e check kore.
+- API kaj na korle dashboard page er survey card theke title, dollar ar minute pore ney.
 - `ASSIGNED` status er survey mane "Available" tab er survey.
 - Notun survey pele tomar nijer Telegram bot diye tomake message pathay.
 - Ekbar je survey er message gese, seta abar pathay na.
@@ -56,10 +57,20 @@ Age WhatsApp version install korle oita Tampermonkey Dashboard theke delete kore
 4. **2. Chat ID auto detect koro** e click koro. "Chat ID pawa geche" dekhabe.
 5. **3. Test Telegram message pathao** e click koro. Telegram e test message ashle setup shesh.
 
+Prothom bar Tampermonkey ekta page dekhate pare je script `api.piperpays.com` ba `api.telegram.org` e jete chay.
+Okhane **Always allow domain** e click koro. Na korle script survey dekhte parbe na.
+
 Step 4 e "Kono message pawa jay nai" dekhale, bot ke abar `/start` pathiye try koro.
 
 Page er niche bam dike ekta chhoto kalo label dekhabe: `TG Notifier: watching · 1 available · last check ...`.
 Eta dekhle bujhbe script cholche.
+
+## Kaj na korle
+
+1. Tampermonkey menu theke **🔍 Ekhon check koro** e click koro.
+2. Ekta box e dekhabe koyta survey pawa gelo, koyta pathano holo, ba ki error holo.
+3. "Egulo age-i pathano hoyeche" dekhale **Seen list clear koro** te click koro, abar pathabe.
+4. Kono error hole script Telegram e o janay, 30 minute e ekbar.
 
 ## Joruri kotha
 
