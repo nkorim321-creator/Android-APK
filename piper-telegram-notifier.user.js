@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Piper WhatsApp Notifier
+// @name         Piper Telegram Notifier
 // @namespace    https://github.com/nkorim321-creator/android-apk
-// @version      1.0.0
-// @description  Piper dashboard e notun survey (hit) available hole WhatsApp e title, pay ar time pathay.
+// @version      2.0.0
+// @description  Piper dashboard e notun survey (hit) available hole Telegram e title, pay ar time pathay.
 // @match        https://www.piperpays.com/*
 // @match        https://piperpays.com/*
 // @run-at       document-idle
@@ -11,16 +11,12 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_notification
-// @connect      api.callmebot.com
+// @connect      api.telegram.org
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  // ---------------------------------------------------------------------------
-  // Settings. Phone ar API key Tampermonkey menu theke set kora jay, code edit
-  // korar dorkar nei. Ekhane default value gulo.
-  // ---------------------------------------------------------------------------
   const API_BASE = 'https://api.piperpays.com';          // Piper er nijer API
   const CAMPAIGNS_PATH = '/campaigns?status=all';         // dashboard eta-i call kore
   const AVAILABLE_STATUS = 'ASSIGNED';                    // "Available" tab = ASSIGNED
@@ -29,27 +25,76 @@
   const MAX_SEEN = 500;
 
   const cfg = {
-    get phone() { return GM_getValue('phone', ''); },
-    get apiKey() { return GM_getValue('apiKey', ''); },
+    get botToken() { return GM_getValue('botToken', ''); },
+    get chatId() { return GM_getValue('chatId', ''); },
     get intervalSec() { return Math.max(30, Number(GM_getValue('intervalSec', 60)) || 60); },
     get desktopNotify() { return GM_getValue('desktopNotify', true); },
   };
 
   // ---------------------------------------------------------------------------
+  // Telegram
+  // ---------------------------------------------------------------------------
+  function telegram(method, payload) {
+    return new Promise((resolve, reject) => {
+      if (!cfg.botToken) { reject(new Error('Bot token set kora nai. Tampermonkey menu theke set koro.')); return; }
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `https://api.telegram.org/bot${cfg.botToken}/${method}`,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify(payload || {}),
+        timeout: 20000,
+        onload: (r) => {
+          let body = null;
+          try { body = JSON.parse(r.responseText); } catch (_) { /* ignore */ }
+          if (body && body.ok) resolve(body.result);
+          else reject(new Error('Telegram: ' + ((body && body.description) || ('HTTP ' + r.status))));
+        },
+        onerror: () => reject(new Error('Telegram network error')),
+        ontimeout: () => reject(new Error('Telegram timeout')),
+      });
+    });
+  }
+
+  function sendTelegram(html) {
+    if (!cfg.chatId) return Promise.reject(new Error('Chat ID nai. Bot ke /start pathiye menu theke "Chat ID auto detect" koro.'));
+    return telegram('sendMessage', {
+      chat_id: cfg.chatId,
+      text: html,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[{ text: '👉 Dashboard kholo', url: DASHBOARD_URL }]] },
+    });
+  }
+
+  async function detectChatId() {
+    const updates = await telegram('getUpdates', { limit: 100 });
+    const msgs = (updates || []).map((u) => u.message || u.edited_message).filter(Boolean);
+    const last = msgs[msgs.length - 1];
+    if (!last) throw new Error('Kono message pawa jay nai. Telegram e tomar bot ke /start pathao, tarpor abar try koro.');
+    GM_setValue('chatId', String(last.chat.id));
+    return last.chat;
+  }
+
+  // ---------------------------------------------------------------------------
   // Tampermonkey menu
   // ---------------------------------------------------------------------------
-  GM_registerMenuCommand('1. WhatsApp number set koro', () => {
-    const v = prompt('Tomar WhatsApp number, country code shoho (jemon +8801712345678):', cfg.phone);
-    if (v !== null) { GM_setValue('phone', v.replace(/[^\d+]/g, '')); status('Number saved'); }
+  GM_registerMenuCommand('1. Telegram bot token set koro', () => {
+    const v = prompt('@BotFather theke pawa bot token (jemon 123456789:ABCdef...):', cfg.botToken);
+    if (v !== null) { GM_setValue('botToken', v.trim()); status('Bot token saved'); }
   });
-  GM_registerMenuCommand('2. CallMeBot API key set koro', () => {
-    const v = prompt('CallMeBot theke pawa APIKEY:', cfg.apiKey);
-    if (v !== null) { GM_setValue('apiKey', v.trim()); status('API key saved'); }
+  GM_registerMenuCommand('2. Chat ID auto detect koro', () => {
+    detectChatId()
+      .then((chat) => alert('Chat ID pawa geche: ' + chat.id + ' (' + (chat.first_name || chat.title || '') + ')\nEkhon "3. Test message" e click koro.'))
+      .catch((e) => alert(e.message));
   });
-  GM_registerMenuCommand('3. Test WhatsApp message pathao', () => {
-    sendWhatsApp('✅ Piper Notifier test message. Setup thik ache!')
-      .then(() => alert('Test message pathano hoyeche. WhatsApp check koro.'))
+  GM_registerMenuCommand('3. Test Telegram message pathao', () => {
+    sendTelegram('✅ <b>Piper Notifier test message.</b>\nSetup thik ache!')
+      .then(() => alert('Test message pathano hoyeche. Telegram check koro.'))
       .catch((e) => alert('Pathano jay nai: ' + e.message));
+  });
+  GM_registerMenuCommand('Chat ID nije set koro', () => {
+    const v = prompt('Telegram chat ID:', cfg.chatId);
+    if (v !== null) { GM_setValue('chatId', v.trim()); status('Chat ID saved'); }
   });
   GM_registerMenuCommand('Check interval (seconds) bodlao', () => {
     const v = prompt('Koto second por por check korbe? (minimum 30)', String(cfg.intervalSec));
@@ -70,6 +115,7 @@
   const money = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
   const titleOf = (c) => c.topic || c.category || 'A new survey';
   const labelOf = (c) => c.category || 'Paid opinion';
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   function tokenExpiresSoon(token) {
     try {
@@ -80,43 +126,21 @@
     }
   }
 
-  function sendWhatsApp(text) {
-    return new Promise((resolve, reject) => {
-      if (!cfg.phone || !cfg.apiKey) {
-        reject(new Error('Phone ba API key set kora nai. Tampermonkey menu theke set koro.'));
-        return;
-      }
-      const url = 'https://api.callmebot.com/whatsapp.php'
-        + '?phone=' + encodeURIComponent(cfg.phone)
-        + '&text=' + encodeURIComponent(text)
-        + '&apikey=' + encodeURIComponent(cfg.apiKey);
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-        timeout: 20000,
-        onload: (r) => (r.status >= 200 && r.status < 300 ? resolve(r) : reject(new Error('CallMeBot HTTP ' + r.status + ': ' + (r.responseText || '').slice(0, 200)))),
-        onerror: () => reject(new Error('CallMeBot network error')),
-        ontimeout: () => reject(new Error('CallMeBot timeout')),
-      });
-    });
-  }
-
   function buildMessage(list) {
-    const head = list.length === 1 ? '🔔 *Notun Piper survey available!*' : `🔔 *${list.length} ta notun Piper survey available!*`;
+    const head = list.length === 1 ? '🔔 <b>Notun Piper survey available!</b>' : `🔔 <b>${list.length} ta notun Piper survey available!</b>`;
     const body = list.map((c) =>
-      `📝 *${titleOf(c)}*\n💰 ${money(c.reward)}  ·  ⏱ ${c.estimatedTimeMinutes ?? '?'} min\n🏷 ${labelOf(c)}`
+      `📝 <b>${esc(titleOf(c))}</b>\n💰 ${money(c.reward)}  ·  ⏱ ${esc(c.estimatedTimeMinutes ?? '?')} min\n🏷 ${esc(labelOf(c))}`
     ).join('\n\n');
-    return `${head}\n\n${body}\n\n👉 ${DASHBOARD_URL}`;
+    return `${head}\n\n${body}`;
   }
 
-  // ---------------------------------------------------------------------------
-  // Small status pill on the page so you can see it is running.
-  // ---------------------------------------------------------------------------
+  // Page e chhoto status label, jate bojha jay script cholche.
   let pill;
   function status(text, isError) {
+    if (!document.body) return;
     if (!pill) {
       pill = document.createElement('div');
-      pill.id = 'piper-wa-notifier';
+      pill.id = 'piper-tg-notifier';
       Object.assign(pill.style, {
         position: 'fixed', left: '12px', bottom: '84px', zIndex: 2147483647,
         font: '12px/1.3 system-ui, sans-serif', padding: '6px 10px', borderRadius: '999px',
@@ -126,7 +150,16 @@
       document.body.appendChild(pill);
     }
     pill.style.background = isError ? 'rgba(160,30,30,.92)' : 'rgba(20,20,20,.85)';
-    pill.textContent = '📲 WA Notifier: ' + text;
+    pill.textContent = '📲 TG Notifier: ' + text;
+  }
+
+  function reloadForLogin() {
+    const last = Number(GM_getValue('lastReloadAt', 0));
+    if (Date.now() - last > 60000) {
+      GM_setValue('lastReloadAt', Date.now());
+      status('login refresh er jonno reload...');
+      location.reload();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -148,36 +181,21 @@
         status('login nai', true);
         if (!GM_getValue('loggedOutWarned', false)) {
           GM_setValue('loggedOutWarned', true);
-          sendWhatsApp('⚠️ Piper theke logout hoye gecho. Notification pete abar login koro: ' + DASHBOARD_URL).catch(() => {});
+          sendTelegram('⚠️ <b>Piper theke logout hoye gecho.</b>\nNotification pete abar login koro.').catch(() => {});
         }
         return;
       }
       GM_setValue('loggedOutWarned', false);
 
-      // Token expire hole site nijei refresh kore page load er somoy.
+      // Token expire hole site nijei page load er somoy refresh kore.
       // Tai amra nije refresh na kore page reload kori, jate site er login nosto na hoy.
-      if (tokenExpiresSoon(token)) {
-        const last = Number(GM_getValue('lastReloadAt', 0));
-        if (Date.now() - last > 60000) {
-          GM_setValue('lastReloadAt', Date.now());
-          status('login refresh er jonno reload...');
-          location.reload();
-        }
-        return;
-      }
+      if (tokenExpiresSoon(token)) { reloadForLogin(); return; }
 
       const res = await fetch(API_BASE + CAMPAIGNS_PATH, {
         headers: { Authorization: 'Bearer ' + token },
         cache: 'no-store',
       });
-      if (res.status === 401) {
-        const last = Number(GM_getValue('lastReloadAt', 0));
-        if (Date.now() - last > 60000) {
-          GM_setValue('lastReloadAt', Date.now());
-          location.reload();
-        }
-        return;
-      }
+      if (res.status === 401) { reloadForLogin(); return; }
       if (!res.ok) throw new Error('Piper API HTTP ' + res.status);
 
       const data = await res.json();
@@ -188,27 +206,25 @@
       const fresh = available.filter((c) => !seen.has(String(c.id)));
 
       if (fresh.length) {
-        const msg = buildMessage(fresh);
         if (cfg.desktopNotify) {
           GM_notification({ title: 'Piper: notun survey', text: fresh.map((c) => `${titleOf(c)} — ${money(c.reward)} · ${c.estimatedTimeMinutes} min`).join('\n'), timeout: 15000 });
         }
-        await sendWhatsApp(msg); // fail hole seen e jabe na, porer bar abar try korbe
+        await sendTelegram(buildMessage(fresh)); // fail hole seen e jabe na, porer bar abar try korbe
         fresh.forEach((c) => seen.add(String(c.id)));
         GM_setValue('seenIds', Array.from(seen).slice(-MAX_SEEN));
       }
 
-      const time = new Date().toLocaleTimeString();
-      status(`watching · ${available.length} available · last check ${time}`);
+      status(`watching · ${available.length} available · last check ${new Date().toLocaleTimeString()}`);
     } catch (e) {
-      console.error('[Piper WA Notifier]', e);
+      console.error('[Piper TG Notifier]', e);
       status('error: ' + e.message, true);
     } finally {
       busy = false;
     }
   }
 
-  if (!cfg.phone || !cfg.apiKey) {
-    setTimeout(() => status('Tampermonkey menu theke number ar API key set koro', true), 1500);
+  if (!cfg.botToken || !cfg.chatId) {
+    setTimeout(() => status('Tampermonkey menu theke bot token ar chat ID set koro', true), 1500);
   }
 
   setTimeout(check, 3000);
