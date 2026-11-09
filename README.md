@@ -49,12 +49,12 @@ Browser er extension store theke **Tampermonkey** install koro.
 
 Age WhatsApp version install korle oita Tampermonkey Dashboard theke delete kore dao.
 
-### 4. Token ar chat ID set koro
+### 4. Token set koro ar chat add koro
 
 1. https://www.piperpays.com/dashboard kholo ar login koro.
 2. Tampermonkey icon e click koro, **Piper Telegram Notifier** er niche menu ashbe.
 3. **1. Telegram bot token set koro** e click kore BotFather er token paste koro.
-4. **2. Chat ID auto detect koro** e click koro. "Chat ID pawa geche" dekhabe.
+4. **2. Chat add koro** e click koro. Tomar naam dekhale OK chapo.
 5. **3. Test Telegram message pathao** e click koro. Telegram e test message ashle setup shesh.
 
 Prothom bar Tampermonkey ekta page dekhate pare je script `api.piperpays.com` ba `api.telegram.org` e jete chay.
@@ -62,8 +62,31 @@ Okhane **Always allow domain** e click koro. Na korle script survey dekhte parbe
 
 Step 4 e "Kono message pawa jay nai" dekhale, bot ke abar `/start` pathiye try koro.
 
+## Eksathe 2-3 jon ke message pathano
+
+1. Bot er link (`t.me/tomar_bot_username`) oi manush ke pathao.
+2. Se link e giye **Start** chapbe.
+3. Tumi dashboard e Tampermonkey menu theke **2. Chat add koro** e click koro.
+4. Notun manush er naam dekhabe, **OK** chapo.
+5. **3. Test Telegram message pathao** dile sobar kache test message jabe.
+
+Kauke bad dite **Chat list dekho / remove koro** te giye tar number lekho.
+Ekjon bot block korleo baki ra message pabe.
+
 Page er niche bam dike ekta chhoto kalo label dekhabe: `TG Notifier: watching · 1 available · last check ...`.
 Eta dekhle bujhbe script cholche.
+
+## Limit
+
+| Jinis | Limit |
+|---|---|
+| Telegram bot | Free. Ek chat e second e 1 ta, group e minute e 20 ta message. Ei script er jonno ei limit kokhono lagbe na. |
+| Koto jon ke pathano jay | Kono fixed limit nai. 2-3 jon kono somossa na. |
+| Check | Default 60 second e ekbar, din e 1440 bar. Minimum 30 second. |
+| Piper API | Piper kono limit lekhe nai. Interval 30 second er niche na namano bhalo. |
+| Seen list | Shesh 1000 ta survey mone rakhe. |
+
+Asol limit holo **PC ar dashboard tab chalu thakte hobe**. PC bondho, sleep ba tab bondho thakle check hoy na.
 
 ## Kaj na korle
 

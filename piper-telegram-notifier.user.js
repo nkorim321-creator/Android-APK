@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Piper Telegram Notifier
 // @namespace    https://github.com/nkorim321-creator/android-apk
-// @version      2.1.0
+// @version      2.2.0
 // @description  Piper dashboard e notun survey (hit) available hole Telegram e title, pay ar time pathay.
 // @match        https://www.piperpays.com/*
 // @match        https://piperpays.com/*
@@ -28,7 +28,14 @@
 
   const cfg = {
     get botToken() { return GM_getValue('botToken', ''); },
-    get chatId() { return GM_getValue('chatId', ''); },
+    // Eksathe koyekjon ke pathano jay. Purono version er single chatId o chalbe.
+    get chats() {
+      const list = GM_getValue('chats', null);
+      if (Array.isArray(list)) return list;
+      const old = GM_getValue('chatId', '');
+      return old ? [{ id: String(old), name: '' }] : [];
+    },
+    set chats(list) { GM_setValue('chats', list); },
     get intervalSec() { return Math.max(30, Number(GM_getValue('intervalSec', 60)) || 60); },
     get desktopNotify() { return GM_getValue('desktopNotify', true); },
   };
@@ -65,24 +72,51 @@
     throw new Error('Telegram: ' + ((body && body.description) || ('HTTP ' + r.status)));
   }
 
-  function sendTelegram(html) {
-    if (!cfg.chatId) return Promise.reject(new Error('Chat ID nai. Bot ke /start pathiye menu theke "Chat ID auto detect" koro.'));
-    return telegram('sendMessage', {
-      chat_id: cfg.chatId,
+  const chatLabel = (c) => (c.name ? c.name + ' (' + c.id + ')' : String(c.id));
+
+  // List er sobar kache pathay. Ekjon er kache fail holeo baki ra pay.
+  // Kono ekjon er kache-o na gele error dey, jate porer check e abar try kore.
+  async function sendTelegram(html) {
+    const chats = cfg.chats;
+    if (!chats.length) throw new Error('Kono chat add kora nai. Bot ke /start pathiye menu theke "Chat add koro" e click koro.');
+    const results = await Promise.allSettled(chats.map((c) => telegram('sendMessage', {
+      chat_id: c.id,
       text: html,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: [[{ text: '👉 Dashboard kholo', url: DASHBOARD_URL }]] },
-    });
+    })));
+    const failed = results
+      .map((r, i) => (r.status === 'rejected' ? chatLabel(chats[i]) + ': ' + r.reason.message : null))
+      .filter(Boolean);
+    if (failed.length === chats.length) throw new Error(failed.join('\n'));
+    if (failed.length) console.warn('[Piper TG Notifier] kichu chat e jay nai:', failed);
+    return { sent: chats.length - failed.length, failed };
   }
 
-  async function detectChatId() {
+  // Bot ke jara /start pathiyeche tader khuje, jiggesh kore list e add kore.
+  async function addChatsFromUpdates() {
     const updates = await telegram('getUpdates', { limit: 100 });
-    const msgs = (updates || []).map((u) => u.message || u.edited_message || u.channel_post).filter(Boolean);
-    const last = msgs[msgs.length - 1];
-    if (!last) throw new Error('Kono message pawa jay nai. Telegram e tomar bot ke /start pathao, tarpor abar try koro.');
-    GM_setValue('chatId', String(last.chat.id));
-    return last.chat;
+    const found = new Map();
+    (updates || [])
+      .map((u) => u.message || u.edited_message || u.channel_post)
+      .filter(Boolean)
+      .forEach((m) => {
+        const c = m.chat;
+        const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.title || (c.username ? '@' + c.username : '');
+        found.set(String(c.id), { id: String(c.id), name });
+      });
+    if (!found.size) throw new Error('Kono message pawa jay nai. Je add hobe, take bot e giye Start chapte bolo, tarpor abar try koro.');
+
+    const chats = cfg.chats;
+    const have = new Set(chats.map((c) => c.id));
+    const added = [];
+    for (const c of found.values()) {
+      if (have.has(c.id)) continue;
+      if (confirm('Ei chat ke notification list e add korbo?\n\n' + chatLabel(c))) { chats.push(c); added.push(c); }
+    }
+    cfg.chats = chats;
+    return { added, chats };
   }
 
   // ---------------------------------------------------------------------------
@@ -292,15 +326,30 @@
     const v = prompt('@BotFather theke pawa bot token (jemon 123456789:ABCdef...):', cfg.botToken);
     if (v !== null) { GM_setValue('botToken', v.trim()); status('Bot token saved'); }
   });
-  GM_registerMenuCommand('2. Chat ID auto detect koro', () => {
-    detectChatId()
-      .then((chat) => { alert('Chat ID pawa geche: ' + chat.id + ' (' + (chat.first_name || chat.title || '') + ')'); check(); })
+  GM_registerMenuCommand('2. Chat add koro (bot e Start chapar por)', () => {
+    addChatsFromUpdates()
+      .then(({ added, chats }) => {
+        alert((added.length ? added.length + ' ta notun chat add hoyeche.' : 'Notun kono chat add hoy nai.')
+          + '\n\nEkhon ' + chats.length + ' jon message pabe:\n' + chats.map((c, i) => (i + 1) + '. ' + chatLabel(c)).join('\n'));
+        check();
+      })
       .catch((e) => alert(e.message));
   });
-  GM_registerMenuCommand('3. Test Telegram message pathao', () => {
+  GM_registerMenuCommand('3. Test Telegram message pathao (sobar kache)', () => {
     sendTelegram('✅ <b>Piper Notifier test message.</b>\nSetup thik ache!')
-      .then(() => alert('Test message pathano hoyeche. Telegram check koro.'))
-      .catch((e) => alert('Pathano jay nai: ' + e.message));
+      .then((r) => alert(r.sent + ' jon er kache test message gese.' + (r.failed.length ? '\n\nJay nai:\n' + r.failed.join('\n') : '')))
+      .catch((e) => alert('Pathano jay nai:\n' + e.message));
+  });
+  GM_registerMenuCommand('Chat list dekho / remove koro', () => {
+    const chats = cfg.chats;
+    if (!chats.length) { alert('List khali. "2. Chat add koro" diye add koro.'); return; }
+    const v = prompt('Ei chat gulo message pay:\n\n' + chats.map((c, i) => (i + 1) + '. ' + chatLabel(c)).join('\n')
+      + '\n\nKauke remove korte tar number lekho. Kichu na korte Cancel chapo.');
+    const n = Number(v);
+    if (v === null || !n || n < 1 || n > chats.length) return;
+    const [gone] = chats.splice(n - 1, 1);
+    cfg.chats = chats;
+    alert(chatLabel(gone) + ' remove hoyeche.');
   });
   GM_registerMenuCommand('🔍 Ekhon check koro', () => {
     check().then((r) => alert(r));
@@ -309,9 +358,12 @@
     GM_setValue('seenIds', []);
     check().then((r) => alert('Seen list clear hoyeche.\n\n' + r));
   });
-  GM_registerMenuCommand('Chat ID nije set koro', () => {
-    const v = prompt('Telegram chat ID:', cfg.chatId);
-    if (v !== null) { GM_setValue('chatId', v.trim()); status('Chat ID saved'); }
+  GM_registerMenuCommand('Chat ID nije lekho (comma diye koyekta)', () => {
+    const v = prompt('Telegram chat ID, koyekta hole comma diye (jemon 111111,222222):', cfg.chats.map((c) => c.id).join(','));
+    if (v === null) return;
+    const old = new Map(cfg.chats.map((c) => [c.id, c]));
+    cfg.chats = v.split(',').map((x) => x.trim()).filter(Boolean).map((id) => old.get(id) || { id, name: '' });
+    status('Chat list saved: ' + cfg.chats.length + ' jon');
   });
   GM_registerMenuCommand('Check interval (seconds) bodlao', () => {
     const v = prompt('Koto second por por check korbe? (minimum 30)', String(cfg.intervalSec));
@@ -325,7 +377,7 @@
   // ---------------------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------------------
-  if (!cfg.botToken || !cfg.chatId) {
+  if (!cfg.botToken || !cfg.chats.length) {
     setTimeout(() => status('Tampermonkey menu theke bot token ar chat ID set koro', true), 1500);
   } else {
     setTimeout(() => status('shuru hocche...'), 500);
