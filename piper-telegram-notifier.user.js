@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Piper Telegram Notifier
 // @namespace    https://github.com/nkorim321-creator/android-apk
-// @version      2.3.0
+// @version      2.4.0
 // @description  Piper dashboard e notun survey (hit) available hole Telegram e title, pay ar time pathay.
 // @match        https://www.piperpays.com/*
 // @match        https://piperpays.com/*
@@ -17,6 +17,18 @@
 
 (function () {
   'use strict';
+
+  // ===========================================================================
+  // ACCOUNT LIST
+  // Piper e je naam diye account khola (dashboard e "Afternoon, Rebeca" te je naam
+  // dekhay) seta ar tar number. Notun account hole niche ekta line add koro:
+  //     'Naam': 3,
+  // Telegram message e dekhabe: "Rebeca No:02".
+  // ===========================================================================
+  const ACCOUNTS = {
+    'Rhonda': 1,
+    'Rebeca': 2,
+  };
 
   const API_BASE = 'https://api.piperpays.com';          // Piper er nijer API
   const CAMPAIGNS_PATH = '/campaigns?status=all';         // dashboard eta-i call kore
@@ -79,6 +91,8 @@
   // List er sobar kache pathay. Ekjon er kache fail holeo baki ra pay.
   // Kono ekjon er kache-o na gele error dey, jate porer check e abar try kore.
   async function sendTelegram(html) {
+    // Sob message er prothom line e account er naam ar number, jate bojha jay kon account.
+    html = '👤 <b>' + esc(accountLabel()) + '</b>\n' + html;
     const chats = cfg.chats;
     if (!chats.length) throw new Error('Kono chat add kora nai. Bot ke /start pathiye menu theke "Chat add koro" e click koro.');
     const results = await Promise.allSettled(chats.map((c) => telegram('sendMessage', {
@@ -165,6 +179,40 @@
     }
     pill.style.background = isError ? 'rgba(170,30,30,.95)' : 'rgba(20,20,20,.9)';
     pill.textContent = '📲 TG Notifier: ' + text;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Kon account login kora: Piper profile theke naam, tarpor ACCOUNTS list theke number.
+  // ---------------------------------------------------------------------------
+  function accountLabel() {
+    const name = GM_getValue('accountName', '');
+    if (!name) return 'Account No:??';
+    const key = Object.keys(ACCOUNTS).find((k) => norm(k) === norm(name));
+    if (!key) return name + ' No:?? (script er ACCOUNTS list e nai)';
+    return key + ' No:' + String(ACCOUNTS[key]).padStart(2, '0');
+  }
+
+  let accountChecked = false;
+  async function loadAccountName(token) {
+    if (accountChecked) return;
+    let name = '';
+    try {
+      const r = await gmRequest({
+        method: 'GET',
+        url: API_BASE + '/auth/me',
+        headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+      });
+      if (r.status >= 200 && r.status < 300) name = (JSON.parse(r.responseText).firstName || '').trim();
+    } catch (_) { /* niche page theke try kori */ }
+    if (!name) {
+      const h1 = document.querySelector('main h1');
+      const m = h1 && h1.textContent.match(/(?:Morning|Afternoon|Evening),\s*([^.]+)\./i);
+      if (m) name = m[1].trim();
+    }
+    if (name) {
+      GM_setValue('accountName', name);
+      accountChecked = true;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -262,6 +310,8 @@
       let source = 'API';
       let apiError = null;
       try {
+        const tok = localStorage.getItem(ACCESS_TOKEN_KEY);
+        if (tok) await loadAccountName(tok);
         list = await surveysFromApi();
         GM_setValue('loggedOutWarned', false);
       } catch (e) {
@@ -294,7 +344,7 @@
       if (fresh.length) {
         if (cfg.desktopNotify) {
           try {
-            GM_notification({ title: 'Piper: notun survey', text: fresh.map((s) => `${s.title} — ${money(s.reward)} · ${s.minutes} min`).join('\n'), timeout: 15000 });
+            GM_notification({ title: 'Piper: notun survey · ' + accountLabel(), text: fresh.map((s) => `${s.title} — ${money(s.reward)} · ${s.minutes} min`).join('\n'), timeout: 15000 });
           } catch (_) { /* ignore */ }
         }
         await sendTelegram(buildMessage(fresh)); // fail hole seen e jabe na, porer bar abar try korbe
@@ -306,8 +356,8 @@
       reloadOnNextTick = source === 'page';
 
       const time = new Date().toLocaleTimeString();
-      status(`watching (${source}) · ${list.length} available · ${fresh.length} pathano · ${time}`);
-      return (lastResult = `${source} theke ${list.length} ta available survey pawa geche. ${fresh.length} ta notun Telegram e pathano hoyeche.`
+      status(`${accountLabel()} · watching (${source}) · ${list.length} available · ${fresh.length} pathano · ${time}`);
+      return (lastResult = `Account: ${accountLabel()}\n${source} theke ${list.length} ta available survey pawa geche. ${fresh.length} ta notun Telegram e pathano hoyeche.`
         + (fresh.length === 0 && list.length ? '\n(Egulo age-i pathano hoyeche. Abar pete chaile "Seen list clear koro".)' : '')
         + (apiError ? '\nAPI error chilo: ' + apiError.message : ''));
     } catch (e) {
@@ -389,7 +439,7 @@
   if (!cfg.botToken || !cfg.chats.length) {
     setTimeout(() => status('Tampermonkey menu theke bot token ar chat ID set koro', true), 1500);
   } else {
-    setTimeout(() => status('shuru hocche...'), 500);
+    setTimeout(() => status('shuru hocche... (' + accountLabel() + ')'), 500);
   }
 
   // Fixed interval er bodole protibar notun random somoy. Second er sathe millisecond o random.

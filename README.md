@@ -5,6 +5,7 @@ Message e thake survey er title, koto dollar/cent, ar koto minute lagbe.
 Niche ekta **Dashboard kholo** button o thake.
 
 ```
+👤 Rebeca No:02
 🔔 Notun Piper survey available!
 
 📝 Feedback on an image
@@ -62,6 +63,35 @@ Prothom bar Tampermonkey ekta page dekhate pare je script `api.piperpays.com` ba
 Okhane **Always allow domain** e click koro. Na korle script survey dekhte parbe na.
 
 Step 4 e "Kono message pawa jay nai" dekhale, bot ke abar `/start` pathiye try koro.
+
+## Koyekta Piper account
+
+Message er prothom line e dekhay kon account e survey eseche, jemon `Rhonda No:01` ba `Rebeca No:02`.
+Script nijei Piper profile theke login kora account er naam ney.
+
+Number gulo script er ekdom upore `ACCOUNTS` list e lekha:
+
+```js
+  const ACCOUNTS = {
+    'Rhonda': 1,
+    'Rebeca': 2,
+  };
+```
+
+Notun account add korte ekta line barao, tarpor save koro:
+
+```js
+  const ACCOUNTS = {
+    'Rhonda': 1,
+    'Rebeca': 2,
+    'Jessica': 3,
+  };
+```
+
+- Naam ta hubohu Piper dashboard er "Afternoon, Rebeca" te je naam dekhay seta-i dibe. Boro-choto hater lekha mile na gelo o chole.
+- Prottek account alada browser ba Chrome profile e login thake. Shob jaygay same script paste koro.
+- List e naam na thakle message e `Jessica No:??` dekhabe. Tokhon bujhbe list e add korte hobe.
+- List bodlale shob browser er script e notun code paste korte hobe.
 
 ## Eksathe 2-3 jon ke message pathano
 
