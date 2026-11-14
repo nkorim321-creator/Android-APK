@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Piper Telegram Notifier
 // @namespace    https://github.com/nkorim321-creator/android-apk
-// @version      3.0.0
-// @description  Piper dashboard e notun survey (hit) available hole Telegram e title, pay ar time pathay. Je account jar, message tar kache jay.
+// @version      3.1.0
+// @description  Piper dashboard e notun survey (hit) available hole Telegram e RDP number, title, pay ar time pathay. Je account jar, message tar kache jay.
 // @match        https://www.piperpays.com/*
 // @match        https://piperpays.com/*
 // @run-at       document-idle
@@ -20,32 +20,12 @@
   'use strict';
 
   // ===========================================================================
-  // SETTINGS: ei 3 ta list tumi nije bhorba. Shob browser e same script paste korba.
-  // Script update korar age ei 3 ta list copy kore rekho, notun script e abar boshabe.
+  // Code e kichu bodlate hobe na. Sob kichu Tampermonkey menu theke set hoy:
+  //   1. Telegram bot token set koro
+  //   2. Account add koro:  PiperNaam,RDP,User,ChatID   jemon  Rhonda,1,Navid,6405530876
+  //   3. Admin chat ID set koro (sob RDP er kaj pabe)
+  // Egulo Tampermonkey e save thake, script update korleo muche jay na.
   // ===========================================================================
-
-  // 1) MANUSH LIST: naam ar tar Telegram chat ID.
-  //    Chat ID pete: oi manush bot e giye Start chapbe, tarpor tumi Tampermonkey menu
-  //    theke "2. Chat ID khujo" te click korba. Group er ID minus (-) diye shuru hoy.
-  const PEOPLE = {
-    'Admin':  '',
-    'Navid':  '',
-    'Nabila': '',
-  };
-
-  // 2) Ei manush ra SOB account er message pabe (tumi nije, ba ekta group).
-  const ALL_ACCOUNTS_TO = ['Admin'];
-
-  // 3) ACCOUNT LIST:  'Piper er naam': [number, 'account ta kar'],
-  //    Naam ta dashboard er "Afternoon, Rebeca" te je naam dekhay seta.
-  //    Malik er naam ta upor er MANUSH LIST er naam er sathe milte hobe.
-  //    Ek account koyekjon er hole:  'Rhonda': [1, 'Navid', 'Nabila'],
-  //    Malik na dile shudhu ALL_ACCOUNTS_TO er manush ra pabe.
-  const ACCOUNTS = {
-    'Rhonda': [1, 'Navid'],
-    'Rebeca': [2],
-    // 'Naam': [7, 'Nabila'],
-  };
 
   const API_BASE = 'https://api.piperpays.com';          // Piper er nijer API
   const CAMPAIGNS_PATH = '/campaigns?status=all';         // dashboard eta-i call kore
@@ -55,10 +35,23 @@
   const MAX_SEEN = 1000;
   const ERROR_ALERT_GAP_MS = 30 * 60 * 1000;              // error hole Telegram e 30 min e ekbar janabe
   const TG_MAX_CHARS = 3500;                              // Telegram er limit 4096, ektu kom rakhi
+  const CHAT_ID_RE = /^-?\d{4,}$/;
 
   const cfg = {
     get botToken() { return GM_getValue('botToken', ''); },
-    // Purono version e menu diye add kora chat list. PEOPLE list khali thakle eta-i use hoy.
+    // [{ name: 'Rhonda', rdp: '1', to: [{ user: 'Navid', id: '6405530876' }] }]
+    get accounts() {
+      const list = GM_getValue('accounts', []);
+      return Array.isArray(list) ? list.filter((a) => a && a.name && a.rdp && Array.isArray(a.to)) : [];
+    },
+    set accounts(list) { GM_setValue('accounts', list); },
+    // Ei chat ID gulo sob RDP er kaj pay.
+    get admins() {
+      const list = GM_getValue('adminChats', []);
+      return Array.isArray(list) ? list.map(String).filter((x) => CHAT_ID_RE.test(x)) : [];
+    },
+    set admins(list) { GM_setValue('adminChats', list); },
+    // Purono version (2.x) e menu diye add kora chat list. Kono account/admin set na thakle eta-i use hoy.
     get oldChats() {
       const list = GM_getValue('chats', null);
       if (Array.isArray(list)) return list;
@@ -142,61 +135,89 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Kon account login kora, ar tar message kar kache jabe
+  // Account list: kon Piper account kon RDP te, ar tar kaj kar Telegram e jabe
   // ---------------------------------------------------------------------------
+  const rdpText = (r) => 'RDP ' + (/^\d$/.test(String(r)) ? '0' + r : r);
+  const chatLabel = (c) => (c.name ? c.name + ' (' + c.id + ')' : String(c.id));
+  const toText = (a) => (a.to.length ? a.to.map((t) => t.user + ' (' + t.id + ')').join(', ') : '(shudhu admin)');
+  const accountLine = (a) => [a.name, a.rdp, ...a.to.flatMap((t) => [t.user, t.id])].join(',');
+  const accountRow = (a) => a.name + ' · ' + rdpText(a.rdp) + '  →  ' + toText(a);
+
+  // "Rhonda,1,Navid,6405530876" theke account. Koyekta eksathe dite ";" diye alada koro.
+  // Ek account koyekjon er hole:  Rhonda,1,Navid,6405530876,Nabila,7012345678
+  // Malik na thakle (shudhu admin pabe):  Rebeca,2
+  function parseAccounts(text) {
+    const ok = [], bad = [];
+    String(text || '')
+      // ";" ba notun line e alada. Copy-paste e line bhenge space hoye gele, number er porer space e o alada.
+      .split(/[;\n|]+|(?<=\d)\s+(?=[^\d\s,])/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((line) => {
+        const f = line.split(',').map((x) => x.trim());
+        while (f.length && !f[f.length - 1]) f.pop();
+        const [name, rawRdp, ...rest] = f;
+        const rdp = String(rawRdp || '').replace(/^rdp\s*[-:]?\s*/i, '');
+        if (!name || !rdp) return bad.push(line + '   ← Piper naam ar RDP number lagbe');
+        if (/^-?\d+$/.test(name)) return bad.push(line + '   ← prothome Piper er naam lekho');
+        if (!/^[A-Za-z0-9-]{1,6}$/.test(rdp)) return bad.push(line + '   ← RDP number bujhi nai: ' + rdp);
+        if (rest.length % 2) return bad.push(line + '   ← User naam ar chat ID duitai lagbe');
+        const to = [];
+        for (let i = 0; i < rest.length; i += 2) {
+          const user = rest[i], id = rest[i + 1].replace(/\s/g, '');
+          if (!user) return bad.push(line + '   ← User naam nai');
+          if (!CHAT_ID_RE.test(id)) return bad.push(line + '   ← chat ID shudhu number hoy: ' + id);
+          to.push({ user, id });
+        }
+        ok.push({ name, rdp, to });
+      });
+    return { ok, bad };
+  }
+
   function account() {
     const name = GM_getValue('accountName', '');
-    const key = Object.keys(ACCOUNTS).find((k) => norm(k) === norm(name));
-    const row = key ? [].concat(ACCOUNTS[key]) : [];
-    return { name, key, no: row[0], owners: row.slice(1).map((x) => String(x).trim()).filter(Boolean) };
+    const row = cfg.accounts.find((a) => norm(a.name) === norm(name)) || null;
+    return { name, row, to: row ? row.to : [] };
   }
 
+  // Telegram e jay: shudhu RDP number.
   function accountLabel() {
     const a = account();
-    if (!a.name) return 'Account No:??';
-    if (!a.key) return a.name + ' No:?? (script er ACCOUNTS list e nai)';
-    return a.key + ' No:' + String(a.no).padStart(2, '0');
+    if (!a.name) return 'RDP ??';
+    if (!a.row) return 'RDP ?? (' + a.name + ' list e nai)';
+    return rdpText(a.row.rdp);
   }
 
-  // MANUSH LIST theke naam diye chat ID. Na thakle ''.
-  function personId(name) {
-    const key = Object.keys(PEOPLE).find((k) => norm(k) === norm(name));
-    return key ? String(PEOPLE[key] ?? '').trim() : '';
+  // Page ar menu te: RDP number ar Piper naam.
+  function pageLabel() {
+    const a = account();
+    return a.row ? rdpText(a.row.rdp) + ' (' + a.row.name + ')' : accountLabel();
   }
-  const personText = (n) => n + (personId(n) ? '' : ' (chat ID nai!)');
-  const chatLabel = (c) => (c.name ? c.name + ' (' + c.id + ')' : String(c.id));
 
-  // Ei browser er account er message kara pabe: account er malik + ALL_ACCOUNTS_TO.
+  // Ei browser er account er kaj kara pabe: account er user + admin.
   function recipients() {
     const byId = new Map();
-    [...account().owners, ...ALL_ACCOUNTS_TO].forEach((n) => {
-      const id = personId(n);
-      if (id && !byId.has(id)) byId.set(id, n);
-    });
+    account().to.forEach((t) => { if (!byId.has(t.id)) byId.set(t.id, t.user); });
+    cfg.admins.forEach((id) => { if (!byId.has(id)) byId.set(id, 'Admin'); });
     let fromOldList = false;
     if (!byId.size) {
-      // PEOPLE list e kono chat ID nai. Purono version er chat list thakle oitay pathai.
+      // Kono account/admin set nai. Purono version er chat list thakle oitay pathai.
       cfg.oldChats.forEach((c) => byId.set(String(c.id), c.name || ''));
       fromOldList = byId.size > 0;
     }
     return { chats: Array.from(byId, ([id, name]) => ({ id, name })), fromOldList };
   }
 
-  function routingText() {
+  function overviewText() {
     const cur = account();
-    const rows = Object.keys(ACCOUNTS).map((k) => {
-      const row = [].concat(ACCOUNTS[k]);
-      const owners = row.slice(1).map((x) => String(x).trim()).filter(Boolean);
-      return 'No:' + String(row[0]).padStart(2, '0') + ' ' + k + '  →  '
-        + (owners.length ? owners.map(personText).join(', ') : '(malik deya nai)')
-        + (cur.key === k ? '   ← ei browser' : '');
-    });
+    const list = cfg.accounts;
     const r = recipients();
-    return 'Kon account er message kar kache jay:\n\n' + rows.join('\n')
-      + '\n\nSob account er message pay: ' + (ALL_ACCOUNTS_TO.map(personText).join(', ') || '(keu na)')
-      + '\n\nEi browser e login: ' + accountLabel()
-      + '\nEr message jabe: ' + (r.chats.map(chatLabel).join(', ') || '(karo kache na, PEOPLE list e chat ID boshao)')
-      + (r.fromOldList ? '\n(PEOPLE list e chat ID nai, tai purono chat list e jacche.)' : '');
+    return 'Account list:\n'
+      + (list.length ? list.map((a, i) => (i + 1) + '. ' + accountRow(a) + (cur.row === null || norm(cur.row.name) !== norm(a.name) ? '' : '   ← ei browser')).join('\n') : '(khali)')
+      + '\n\nAdmin (sob RDP er kaj pay): ' + (cfg.admins.join(', ') || '(keu na)')
+      + '\n\nEi browser e login: ' + (cur.name ? cur.name + ' → ' + accountLabel() : '(jana nai)')
+      + '\nEr kaj jabe: ' + (r.chats.map(chatLabel).join(', ') || '(karo kache na)')
+      + (r.fromOldList ? '\n(Kono account/admin set nai, tai purono chat list e jacche.)' : '');
   }
 
   let accountToken = null;
@@ -239,21 +260,18 @@
     throw new Error('Telegram: ' + ((body && body.description) || ('HTTP ' + r.status)));
   }
 
-  // Ei account er malik ar ALL_ACCOUNTS_TO er sobar kache pathay.
+  // Ei account er user ar admin der kache pathay. Prothom line e shudhu RDP number.
   // Ekjon er kache fail holeo baki ra pay, ar baki der janano hoy ke pay nai.
   // Kono ekjon er kache-o na gele error dey, jate porer check e abar try kore.
   async function sendTelegram(html, opts) {
     const chats = recipients().chats;
-    if (!chats.length) throw new Error('Kono chat ID nai. Script er upore PEOPLE list e chat ID boshao (menu: "2. Chat ID khujo").');
-    // Prothom line e account er naam, number ar malik, jate bojha jay kon account.
-    const owners = account().owners.map(personText).join(', ');
-    const text = '👤 <b>' + esc(accountLabel()) + '</b>' + (owners ? '  →  ' + esc(owners) : '') + '\n' + html;
+    if (!chats.length) throw new Error('Ei RDP er kaj kauke pathano jacche na. Menu theke "2. Account add koro" ba "3. Admin chat ID set koro".');
+    const text = '🖥 <b>' + esc(accountLabel()) + '</b>\n' + html;
     const results = await Promise.allSettled(chats.map((c) => telegram('sendMessage', {
       chat_id: c.id,
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [[{ text: '👉 Dashboard kholo', url: DASHBOARD_URL }]] },
     })));
     const failed = results
       .map((r, i) => (r.status === 'rejected' ? chatLabel(chats[i]) + ': ' + safe(r.reason.message) : null))
@@ -283,13 +301,12 @@
     return Array.from(found.values());
   }
 
-  // Onek survey eksathe ashle koyekta message e bhag kore, jate Telegram er limit par na hoy.
+  // Telegram message e shudhu title, reward ar time. Onek survey hole koyekta message e bhag kori.
   function buildMessages(list) {
-    const head = list.length === 1 ? '🔔 <b>Notun Piper survey available!</b>' : `🔔 <b>${list.length} ta notun Piper survey available!</b>`;
     const groups = [];
     let cur = { items: [], text: '' };
     list.forEach((s) => {
-      const block = `📝 <b>${esc(cut(s.title, 300))}</b>\n💰 ${money(s.reward)}  ·  ⏱ ${esc(s.minutes ?? '?')} min\n🏷 ${esc(cut(s.label, 100))}`;
+      const block = `📝 <b>${esc(cut(s.title, 300))}</b>\n💰 ${money(s.reward)}  ·  ⏱ ${esc(s.minutes ?? '?')} min`;
       if (cur.items.length && cur.text.length + block.length + 2 > TG_MAX_CHARS) {
         groups.push(cur);
         cur = { items: [], text: '' };
@@ -298,10 +315,7 @@
       cur.items.push(s);
     });
     if (cur.items.length) groups.push(cur);
-    return groups.map((g, i) => ({
-      items: g.items,
-      html: head + (groups.length > 1 ? ` (${i + 1}/${groups.length})` : '') + '\n\n' + g.text,
-    }));
+    return groups.map((g) => ({ items: g.items, html: g.text }));
   }
 
   // ---------------------------------------------------------------------------
@@ -325,7 +339,6 @@
       .map((c) => ({
         id: String(c.id),
         title: c.topic || c.category || 'A new survey',
-        label: c.category || 'Paid opinion',
         reward: c.reward,
         minutes: c.estimatedTimeMinutes,
       }));
@@ -347,12 +360,10 @@
         const price = text.match(/\$\s?([\d,]+(?:\.\d+)?)/);
         const mins = text.match(/(\d+)\s*min/i);
         const titleEl = card.querySelector('p.font-serif') || card.querySelector('p');
-        const labelEl = card.querySelector('span');
         const title = (titleEl ? titleEl.textContent : '').trim() || 'A new survey';
         return {
           id: null,
           title,
-          label: (labelEl ? labelEl.textContent : '').trim() || 'Paid opinion',
           reward: price ? Number(price[1].replace(/,/g, '')) : 0,
           minutes: mins ? Number(mins[1]) : null,
         };
@@ -563,7 +574,7 @@
 
       if (fresh.length && cfg.desktopNotify) {
         try {
-          GM_notification({ title: 'Piper: notun survey · ' + accountLabel(), text: fresh.map((s) => `${s.title} — ${money(s.reward)} · ${s.minutes ?? '?'} min`).join('\n'), timeout: 15000 });
+          GM_notification({ title: 'Piper: notun survey · ' + pageLabel(), text: fresh.map((s) => `${s.title} — ${money(s.reward)} · ${s.minutes ?? '?'} min`).join('\n'), timeout: 15000 });
         } catch (_) { /* ignore */ }
       }
 
@@ -579,9 +590,9 @@
       }
 
       const time = new Date().toLocaleTimeString();
-      status(`${accountLabel()} · watching (${source}) · ${list.length} available · ${fresh.length} pathano · ${time}`);
-      return (lastResult = `Account: ${accountLabel()}\n${source} theke ${list.length} ta available survey pawa geche. ${fresh.length} ta notun Telegram e pathano hoyeche.`
-        + '\nMessage jay: ' + (recipients().chats.map(chatLabel).join(', ') || '(karo kache na)')
+      status(`${pageLabel()} · watching (${source}) · ${list.length} available · ${fresh.length} pathano · ${time}`);
+      return (lastResult = `Account: ${pageLabel()}\n${source} theke ${list.length} ta available survey pawa geche. ${fresh.length} ta notun Telegram e pathano hoyeche.`
+        + '\nKaj jay: ' + (recipients().chats.map(chatLabel).join(', ') || '(karo kache na)')
         + (fresh.length === 0 && list.length ? '\n(Egulo age-i pathano hoyeche. Abar pete chaile "Seen list clear koro".)' : '')
         + (apiError ? '\nAPI error chilo: ' + apiError.message : ''));
     } catch (e) {
@@ -607,28 +618,95 @@
     const v = prompt('@BotFather theke pawa bot token (jemon 123456789:ABCdef...):', cfg.botToken);
     if (v !== null) { GM_setValue('botToken', v.trim()); status('Bot token saved'); }
   });
-  GM_registerMenuCommand('2. Chat ID khujo (bot e Start chapar por)', () => {
-    findChats()
-      .then((list) => {
-        const inList = (id) => Object.keys(PEOPLE).find((k) => String(PEOPLE[k] ?? '').trim() === id);
-        const rows = list.map((c) => (c.name || '(naam nai)') + '  =  ' + c.id
-          + (inList(c.id) ? '   ✔ list e ache: ' + inList(c.id) : '   ✘ list e nai'));
-        const copy = list.map((c) => `'${(c.name || 'Naam').replace(/['\\]/g, '').split(' ')[0]}': '${c.id}',`).join(' ');
-        prompt('Bot e jara Start chepeche:\n\n' + rows.join('\n')
-          + '\n\nNicher line ta copy kore script er upore PEOPLE list e boshao, tarpor script save koro:', copy);
-      })
-      .catch((e) => alert(safe(e.message)));
+
+  GM_registerMenuCommand('2. Account add koro (Naam,RDP,User,ChatID)', () => {
+    const v = prompt('Emon lekho:  PiperNaam,RDP number,User naam,Telegram chat ID\n'
+      + 'Jemon:  Rhonda,1,Navid,6405530876\n\n'
+      + 'Koyekta eksathe dite ";" diye alada koro:\n'
+      + 'Rhonda,1,Navid,6405530876; Rebeca,2,Nabila,7012345678\n\n'
+      + 'Same Piper naam age theke thakle notun ta diye bodle jabe.', '');
+    if (v === null || !v.trim()) return;
+    const { ok, bad } = parseAccounts(v);
+    if (bad.length) {
+      alert('Kichu save kori nai. Ei line gulo bujhi nai:\n\n' + bad.join('\n') + '\n\nEmon lekho: Rhonda,1,Navid,6405530876');
+      return;
+    }
+    // Ek-i input e same naam duibar thakle shesh ta rakhi.
+    const incoming = new Map();
+    ok.forEach((a) => incoming.set(norm(a.name), a));
+    const list = cfg.accounts;
+    const rows = Array.from(incoming.values()).map((a) => {
+      const old = list.find((x) => norm(x.name) === norm(a.name));
+      return '• ' + accountRow(a) + (old ? '\n     (age chilo: ' + accountRow(old) + ')' : '');
+    });
+    if (!confirm('Ei account gulo save korbo?\n\n' + rows.join('\n'))) return;
+    const merged = list.filter((x) => !incoming.has(norm(x.name))).concat(Array.from(incoming.values()));
+    merged.sort((x, y) => String(x.rdp).localeCompare(String(y.rdp), undefined, { numeric: true }));
+    cfg.accounts = merged;
+    ensureAccount().then(() => {
+      alert(incoming.size + ' ta account save hoyeche.\n\n' + overviewText());
+      status('account save hoyeche · ' + pageLabel());
+    });
   });
-  GM_registerMenuCommand('3. Test message pathao (ei account er manush der)', () => {
+
+  GM_registerMenuCommand('3. Admin chat ID set koro (sob RDP er kaj pabe)', () => {
+    const v = prompt('Sob RDP er kaj kara pabe? Telegram chat ID lekho, koyekta hole comma diye.\n'
+      + 'Jemon: 6405530876, 7012345678\nKauke na dite khali kore OK chapo.', cfg.admins.join(', '));
+    if (v === null) return;
+    const ids = v.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+    const bad = ids.filter((x) => !CHAT_ID_RE.test(x));
+    if (bad.length) { alert('Ei gulo chat ID na (shudhu number hoy):\n' + bad.join(', ')); return; }
+    cfg.admins = Array.from(new Set(ids));
+    alert('Admin: ' + (cfg.admins.join(', ') || '(keu na)') + '\n\nEra sob RDP er kaj pabe.');
+  });
+
+  GM_registerMenuCommand('4. Test message pathao (ei RDP er manush der)', () => {
     ensureAccount()
       .then(() => sendTelegram('✅ <b>Piper Notifier test message.</b>\nSetup thik ache!', { quiet: true }))
-      .then((r) => alert(accountLabel() + '\n' + r.sent + ' jon er kache test message gese:\n'
+      .then((r) => alert(pageLabel() + '\n' + r.sent + ' jon er kache test message gese:\n'
         + r.chats.map(chatLabel).join('\n') + (r.failed.length ? '\n\nJay nai:\n' + r.failed.join('\n') : '')))
       .catch((e) => alert('Pathano jay nai:\n' + safe(e.message)));
   });
-  GM_registerMenuCommand('Kon account kar kache jay dekho', () => {
-    ensureAccount().then(() => alert(routingText()));
+
+  GM_registerMenuCommand('Chat ID khujo (bot e Start chapar por)', () => {
+    findChats()
+      .then((list) => {
+        const used = (id) => {
+          const where = cfg.accounts
+            .filter((a) => a.to.some((t) => t.id === id))
+            .map((a) => a.to.find((t) => t.id === id).user + ' · ' + rdpText(a.rdp));
+          if (cfg.admins.includes(id)) where.push('Admin');
+          return where;
+        };
+        const rows = list.map((c) => {
+          const w = used(c.id);
+          return (c.name || '(naam nai)') + '  =  ' + c.id + (w.length ? '   ✔ ' + w.join(', ') : '   ✘ kothao nai');
+        });
+        const copy = list.map((c) => (c.name || 'Naam').replace(/[,;|]/g, '').split(' ')[0] + ',' + c.id).join('; ');
+        prompt('Bot e jara Start chepeche:\n\n' + rows.join('\n')
+          + '\n\nAccount add korte: PiperNaam,RDP,User,ChatID  (jemon Rhonda,1,Navid,6405530876)\nNicher lekha theke chat ID copy korte paro:', copy);
+      })
+      .catch((e) => alert(safe(e.message)));
   });
+
+  GM_registerMenuCommand('Account list dekho / remove koro', () => {
+    ensureAccount().then(() => {
+      const list = cfg.accounts;
+      const v = prompt(overviewText() + (list.length ? '\n\nKono account remove korte tar number lekho. Kichu na korte Cancel chapo.' : ''));
+      const n = Number(v);
+      if (v === null || !list.length || !n || n < 1 || n > list.length) return;
+      const [gone] = list.splice(n - 1, 1);
+      cfg.accounts = list;
+      alert(accountRow(gone) + '\nremove hoyeche.');
+    });
+  });
+
+  GM_registerMenuCommand('Account list copy koro (onno RDP er jonno)', () => {
+    const list = cfg.accounts;
+    if (!list.length) { alert('List khali. "2. Account add koro" diye add koro.'); return; }
+    prompt('Ei lekha ta copy kore onno RDP er "2. Account add koro" te paste koro:', list.map(accountLine).join('; '));
+  });
+
   GM_registerMenuCommand('🔍 Ekhon check koro', () => {
     check({ force: true }).then((r) => alert(r));
   });
@@ -659,10 +737,10 @@
   // ---------------------------------------------------------------------------
   if (!cfg.botToken) {
     setTimeout(() => status('Tampermonkey menu theke bot token set koro', true), 1500);
-  } else if (!recipients().chats.length) {
-    setTimeout(() => status('script er PEOPLE list e chat ID boshao', true), 1500);
+  } else if (!recipients().chats.length && !cfg.accounts.length) {
+    setTimeout(() => status('Tampermonkey menu theke "2. Account add koro"', true), 1500);
   } else {
-    setTimeout(() => status('shuru hocche... (' + accountLabel() + ')'), 500);
+    setTimeout(() => status('shuru hocche... (' + pageLabel() + ')'), 500);
   }
 
   // Tab bondho ba reload hole dayitto chere dei, jate onno tab sathe sathe nite pare.
