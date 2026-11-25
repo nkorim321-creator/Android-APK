@@ -149,8 +149,9 @@ document.getElementById('f').addEventListener('change', function (ev) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+// PASSWORD bodlano hoyeche kina (placeholder lekha ta ekhane alada kore rakha, jate find-replace e na bodlay)
 function passwordSet_() {
-  return PASSWORD && PASSWORD !== 'ekta-password-dao';
+  return typeof PASSWORD === 'string' && PASSWORD.length > 0 && PASSWORD !== ['ekta', 'password', 'dao'].join('-');
 }
 
 function json_(obj) {
