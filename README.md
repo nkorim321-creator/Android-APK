@@ -2,6 +2,7 @@
 
 Piper (piperpays.com) dashboard e notun survey **Available** hole Telegram e message ashe.
 Je RDP er kaj, message automatic oi RDP er user er personal Telegram e jay. Admin sob RDP er kaj pay.
+Sathe sob ID er cash-out (kon tarikh e koto dollar) admin ke janay.
 
 Telegram message e shudhu RDP number, kaj er title, reward ar time thake:
 
@@ -55,7 +56,7 @@ https://www.piperpays.com/dashboard kholo, login koro, tarpor Tampermonkey icon 
 
    Mane: `Piper naam, RDP number, User naam, User er Telegram chat ID`.
    OK chapar por script dekhabe ki save hobe, abar OK chapo.
-3. **3. Admin chat ID set koro**: je (tumi) sob RDP er kaj pabe tar chat ID. Koyekjon hole comma diye.
+3. **3. Admin chat ID set koro**: je (tumi) sob RDP er kaj ar cash-out er khobor pabe tar chat ID. Koyekjon hole comma diye.
 4. **4. Test message pathao**: ei RDP er user ar admin test message pele setup shesh.
 
 Prothom bar Tampermonkey ekta page dekhate pare je script `api.piperpays.com` ba `api.telegram.org` e jete chay.
@@ -101,6 +102,32 @@ Group e kaj pathate bot ke group e add koro, tarpor **Chat ID khujo** dao. Group
 Page er niche bam dike ekta chhoto kalo label dekhabe: `TG Notifier: RDP 01 (Rhonda) · watching (API) · 1 available ...`.
 Eta dekhle bujhbe script cholche.
 
+## Cash-out tracker
+
+Script protita RDP er Piper account er cash-out (Earnings page er "Cash-outs") track kore ar **admin** ke Telegram e janay.
+
+- **Prothom bar** oi account er puro cash-out list pathay:
+
+  ```
+  🖥 RDP 01
+  💵 Cash-out report
+  Nov 18, 2026  ·  $37.27  ·  Paid
+  Nov 11, 2026  ·  $10.25  ·  Paid
+
+  Mot paid: $47.52 (2 ta)
+  Balance: $1.20  ·  Lifetime: $49.00
+  ```
+
+- **Notun cash-out** hole janay, jemon `Nov 25, 2026 · $12.00 · On its way`, sathe notun total.
+- **Status bodlale** o janay, jemon `On its way → Paid`.
+- **Kokhon check kore:** 45-90 minute e ekbar.
+- **Hate report:** jekono somoy menu theke **💵 Cash-out report pathao** dao. Puro list Telegram e jay, ar screen e o dekhay.
+- **Total:** `Mot paid` e shudhu Paid cash-out gona hoy. "On its way" gulo `Ashche` te dekhay. Canceled ar Didn't go through total e dhora hoy na.
+- **Kar kache jay:** cash-out er khobor shudhu admin pay. Admin set na thakle oi RDP er user pay.
+- **Kono button chape na:** script shudhu pore. Cash-out request ba "Redeem your reward" kokhono chape na, reward er link o kothao pathay na.
+
+Sob RDP er message admin er Telegram e ashe, tai protita message er `RDP 01`, `RDP 02` dekhe bojha jay kon ID te koto cash-out hoyeche.
+
 ## Limit
 
 | Jinis | Limit |
@@ -131,5 +158,5 @@ Asol limit holo **RDP ar dashboard tab chalu thakte hobe**. RDP bondho, sleep ba
 - Ek browser e koyekta dashboard tab khola thakle shudhu ekta tab check kore. Oi tab bondho hole arekta tab dayitto ney.
 - Internet na thakle script page reload kore na, internet fire ashle nijei abar check shuru kore.
 - Random somoy er karone notun survey er message ashte 1-5 minute deri hote pare.
-- Script tomar Piper password ba token kothao pathay na. Telegram e shudhu RDP number, survey er title, pay ar time jay.
+- Script tomar Piper password ba token kothao pathay na. Telegram e shudhu RDP number, survey er title, pay ar time, ar admin ke cash-out er tarikh, dollar ar status jay.
 - Bot token kono error message e dekhay na.
