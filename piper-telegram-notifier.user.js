@@ -528,7 +528,7 @@
     const d = new Date(iso);
     return isNaN(d) ? '' : d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
   };
-  // "50.117.3.240:3200" ba "http://50.117.3.240:3200/" -> "http://50.117.3.240:3200". Bhul hole ''.
+  // "1.2.3.4:3200" ba "http://1.2.3.4:3200/" -> "http://1.2.3.4:3200". Bhul hole ''.
   function cleanMonitorUrl(v) {
     let t = String(v || '').trim();
     if (!t) return '';
