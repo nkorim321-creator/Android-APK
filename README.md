@@ -2,7 +2,7 @@
 
 Piper (piperpays.com) dashboard e notun survey **Available** hole Telegram e message ashe.
 Je RDP er kaj, message automatic oi RDP er user er personal Telegram e jay. Admin sob RDP er kaj pay.
-Cash-out er hisab (kon ID te kon tarikh e koto dollar) Telegram e na, alada Google Sheet ar HTML monitor page e dekhay.
+Cash-out er hisab (kon ID te kon tarikh e koto dollar) Telegram e na, tomar nijer server er monitor page e dekhay.
 
 Telegram message e shudhu RDP number, kaj er title, reward ar time thake:
 
@@ -102,62 +102,75 @@ Group e kaj pathate bot ke group e add koro, tarpor **Chat ID khujo** dao. Group
 Page er niche bam dike ekta chhoto kalo label dekhabe: `TG Notifier: RDP 01 (Rhonda) · watching (API) · 1 available ...`.
 Eta dekhle bujhbe script cholche.
 
-## Cash-out monitor (Google Sheet + HTML page)
+## Cash-out monitor (nijer server e)
 
-Cash-out er hisab Telegram e jay na. Protita RDP er script tar account er cash-out ar balance ekta Google Sheet e pathay.
-Ek-i link browser e khulle ekta monitor page dekhay:
+Cash-out er hisab Telegram e jay na. Protita RDP er script tar account er cash-out ar balance tomar nijer server e pathay.
+Browser e server er link khulle (password diye) monitor page dekhay:
 
 - **Upore 3 ta box:** sob ID mile mot koto paid, koto ashche (On its way), ar mot balance koto.
 - **ID onujayi:** protita RDP / account er mot paid, koyta cash-out, balance, lifetime, shesh cash-out er tarikh, ar shesh kokhon data eseche. 3 ghonta data na ashle lal ⚠ dekhay, mane oi RDP er script bondho.
 - **Mash onujayi:** kon mash e koto dollar paid hoyeche.
 - **Sob cash-out:** tarikh, RDP, account, dollar ar status. Upore RDP bachai kore shudhu oi RDP er gula dekha jay.
 
-Google Sheet e o `Cash-outs` ar `Summary` tab e ek-i data thake.
+Page protiti 1 minute e nijei refresh hoy. Script protita RDP te 45-90 minute e ekbar data pathay.
+Script shudhu pore: cash-out request ba "Redeem your reward" kokhono chape na, reward er link o pathay na.
 
-Script protita RDP te 45-90 minute e ekbar pathay. Script shudhu pore: cash-out request ba "Redeem your reward" kokhono chape na, reward er link o pathay na.
+### Server e chalu kora (ekbar)
 
-### Setup (ekbar)
+Server e **Node.js** (16 ba notun) lagbe. Kono npm package lage na.
 
-1. https://sheets.new kholo, ekta notun Google Sheet banao. Naam dao, jemon `Piper Cash-out`.
-2. Menu theke **Extensions → Apps Script** e jao.
-3. `Code.gs` e ja ache sob muche dao, `cashout-monitor.gs` file er puro code paste koro.
-4. Code er upore `const PASSWORD = 'ekta-password-dao';` er jaygay nijer ekta password dao, jemon `const PASSWORD = 'rdp-2026-xyz';`. Save koro.
-5. Upore dan dike **Deploy → New deployment** e click koro.
-   - Type: **Web app**
-   - Execute as: **Me**
-   - Who has access: **Anyone**
-6. **Deploy** chapo. Google permission chaile **Authorize access** dao. "Google hasn't verified this app" dekhale **Advanced → Go to ... (unsafe)** chapo; eta tomar nijer script.
-7. **Web app URL** ta copy koro. Dekhte emon: `https://script.google.com/macros/s/AKfy.../exec`
+1. `cashout-server/server.js` file ta server er ekta folder e rakho, jemon `piper-cashout`.
+2. Oi folder e giye chalao (port ar password nijer moto):
 
-"Anyone" dile-o password chara keu data dekhte ba pathate pare na.
+   ```
+   node server.js --port 3200 --password tomar-password
+   ```
+
+   `Piper Cash-out Monitor cholche: http://0.0.0.0:3200` dekhale cholche.
+3. Server bondho holeo jeno nijei abar chalu hoy, tai **pm2** diye chalao (Linux ar Windows duitai):
+
+   ```
+   npm install -g pm2
+   pm2 start server.js --name piper-cashout -- --port 3200 --password tomar-password
+   pm2 save
+   ```
+
+   Linux e restart er por o chalu rakhte ekbar `pm2 startup` dao, je command dekhay seta chalao.
+4. Server er firewall e port ta kholo:
+   - Ubuntu: `sudo ufw allow 3200/tcp`
+   - Windows: `netsh advfirewall firewall add rule name="Piper Cash-out 3200" dir=in action=allow protocol=TCP localport=3200`
+   - Server company (VPS) er panel e alada firewall thakle okhane o 3200 kholo.
+5. Browser e `http://SERVER-IP:3200` kholo. Password page ashle server thik ache.
+
+Port 3200 e age theke kichu cholle server bole `Port 3200 e already onno kichu cholche`. Tokhon onno port dao, jemon `--port 3201`.
+
+Data thake `server.js` er pasher `cashout-data.json` file e. Ei file muche dile monitor khali hoye jay; RDP gula porer bar abar pathabe.
 
 ### Protita RDP te
 
 1. Notun userscript ta purono script er upor-e paste kore save koro.
-2. Tampermonkey menu theke **💵 Cash-out sheet link set koro** e click koro.
-3. Web app URL paste koro, tarpor password dao.
-4. Script sathe sathe ei RDP er cash-out sheet e pathabe, ar monitor er link dekhabe.
+2. Tampermonkey menu theke **💵 Cash-out monitor link set koro** e click koro.
+3. Server er link lekho, jemon `http://SERVER-IP:3200`, tarpor password dao.
+4. Script sathe sathe ei RDP er cash-out pathabe, ar monitor er link dekhabe.
 
-Prothom bar Tampermonkey `script.google.com` e jete permission chaite pare. **Always allow domain** chapo.
+Prothom bar Tampermonkey server er IP te jete permission chaite pare. **Always allow domain** chapo.
 
 ### Monitor dekha
 
-Browser e ei link kholo, bookmark kore rakho:
-
-```
-https://script.google.com/macros/s/AKfy.../exec?key=tomar-password
-```
-
-Notun data dekhte page refresh koro. Phone e o khole.
+Browser e `http://SERVER-IP:3200` kholo, password dao. Ekbar dile oi browser 1 bochor mone rakhe. Phone e o khole.
 
 ### Somossa hole
 
-- **Menu theke dekho:** **💵 Cash-out sheet e ekhon pathao** dile sathe sathe pathay, ar kichu bhul hole ki bhul seta bole.
-- **Shesh kokhon gese:** **Account list dekho / remove koro** ar **🔍 Ekhon check koro** te `Cash-out sheet:` line e dekhay shesh kokhon pathano hoyeche, ba ki error.
-- **"Sheet: password bhul":** Tampermonkey er password ar Apps Script er `PASSWORD` mile na.
-- **"Who has access: Anyone" dao:** deploy er somoy "Anyone" deya hoy nai.
-- **Apps Script code bodlale:** **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. Link ek-i thake.
+- **Menu theke dekho:** **💵 Cash-out monitor e ekhon pathao** dile sathe sathe pathay, ar kichu bhul hole ki bhul seta bole.
+- **Shesh kokhon gese:** **Account list dekho / remove koro** ar **🔍 Ekhon check koro** te `Cash-out monitor:` line e dekhay shesh kokhon pathano hoyeche, ba ki error.
+- **"Monitor: password bhul":** Tampermonkey er password ar server er `--password` mile na.
+- **"Monitor server e jete parchi na":** server bondho, ba firewall e port khola nai.
+- **"thik uttor ashe nai (HTTP 404)":** link e bhul port, onno kono app (jemon BP monitor) er port deya hoyeche.
+- **15 minute e 20 bar bhul password** dile oi IP 15 minute atke thake.
+- **Password bodlate:** server notun `--password` diye abar chalao, protita RDP te menu theke notun password dao, browser e abar login koro.
 - **Monitor bondho korte:** menu te link er jaygay khali kore OK chapo. Tokhon script Piper er cash-out pora-o bondho kore.
+
+Server ta `http` e chole, tai password network e lukano thake na. Ei password ta onno kothao (Piper, email) use korba na.
 
 ## Limit
 
@@ -189,5 +202,5 @@ Asol limit holo **RDP ar dashboard tab chalu thakte hobe**. RDP bondho, sleep ba
 - Ek browser e koyekta dashboard tab khola thakle shudhu ekta tab check kore. Oi tab bondho hole arekta tab dayitto ney.
 - Internet na thakle script page reload kore na, internet fire ashle nijei abar check shuru kore.
 - Random somoy er karone notun survey er message ashte 1-5 minute deri hote pare.
-- Script tomar Piper password ba token kothao pathay na. Telegram e shudhu RDP number, survey er title, pay ar time jay. Cash-out er tarikh, dollar ar status shudhu tomar nijer Google Sheet e jay.
+- Script tomar Piper password ba token kothao pathay na. Telegram e shudhu RDP number, survey er title, pay ar time jay. Cash-out er tarikh, dollar ar status shudhu tomar nijer monitor server e jay.
 - Bot token kono error message e dekhay na.
