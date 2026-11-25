@@ -11,8 +11,8 @@
  * --password: monitor dekhar password.
  * --admin-password: shudhu admin; cash-out "Settled" tick dite lage. Na dile tick kora jay na.
  *
- * Taka bhag (default): Worker 50%, Buyer 25%, VPS 25%.
- * Protita cash-out e $0.50 fee shudhu Worker theke kate. Buyer ar VPS puro bhag pay.
+ * Taka bhag (default): protita cash-out theke age $0.50 fee kate (received = sent - fee),
+ * tarpor received taka Worker 50%, Buyer 25%, VPS 25%.
  * Bodlate chaile:  --worker 50 --buyer 25 --vps 25 --fee 0.50
  *
  * Kono npm package lage na, shudhu Node.js (16 ba notun).
@@ -235,18 +235,24 @@ const rdpNo = (s) => { const m = /(\d+)/.exec(String(s)); return m ? Number(m[1]
 const sum = (arr) => arr.reduce((t, c) => t + (Number(c.amount) || 0), 0);
 const cents = (n) => money(n / 100);
 
-// Ek cash-out er bhag, cent e. Buyer ar VPS puro bhag pay; fee shudhu Worker theke kate.
-// Baki cent Worker pay, tai sob mile sob somoy cash-out er shoman hoy.
+// Ek cash-out er bhag, cent e: age fee kate (received = sent - fee), tarpor received er percent.
+// Adha cent hole (jemon $10.62 er 25% = $2.655) je bhag er cent er bhagta boro se 1 cent pay;
+// soman hole Worker, tarpor Buyer, tarpor VPS. Tai tin bhag mile sob somoy received er shoman hoy.
 function splitCents(amount) {
   const gross = Math.round((Number(amount) || 0) * 100);
   const fee = Math.min(FEE_CENTS, gross);
-  const vps = Math.round(gross * SPLIT.vps / 100);
-  const buyer = Math.round(gross * SPLIT.buyer / 100);
-  const worker = gross - fee - vps - buyer;
-  return { gross, fee, worker, buyer, vps };
+  const net = gross - fee;
+  const parts = [['worker', SPLIT.worker], ['buyer', SPLIT.buyer], ['vps', SPLIT.vps]]
+    .map(([k, pc]) => { const exact = net * pc / 100; const c = Math.floor(exact + 1e-9); return { k, c, rem: exact - c }; });
+  let left = net - parts.reduce((t, x) => t + x.c, 0);
+  parts.slice().sort((a, b) => b.rem - a.rem).forEach((x) => { if (left > 0) { x.c += 1; left -= 1; } });
+  const out = { gross, fee, net };
+  parts.forEach((x) => { out[x.k] = x.c; });
+  return out;
 }
-const addSplit = (t, s) => { ['gross', 'fee', 'worker', 'buyer', 'vps'].forEach((k) => { t[k] += s[k]; }); return t; };
-const zeroSplit = () => ({ gross: 0, fee: 0, worker: 0, buyer: 0, vps: 0 });
+const SPLIT_KEYS = ['gross', 'fee', 'net', 'worker', 'buyer', 'vps'];
+const addSplit = (t, s) => { SPLIT_KEYS.forEach((k) => { t[k] += s[k]; }); return t; };
+const zeroSplit = () => ({ gross: 0, fee: 0, net: 0, worker: 0, buyer: 0, vps: 0 });
 const pillClass = (st) => (st === 'DELIVERED' ? 'ok' : st === 'CANCELED' || st === 'FAILED' ? 'bad' : 'wait');
 
 const CSS = `
@@ -306,7 +312,7 @@ function monitorPage(isAdmin) {
     return Object.assign({}, a, {
       openN: open.length, comingSum: sum(coming),
       split: open.reduce((t, c) => addSplit(t, c.split), zeroSplit()),
-      settled: list.filter((c) => c.settledAt).reduce((t, c) => t + c.split.gross, 0),
+      settled: list.filter((c) => c.settledAt).reduce((t, c) => t + c.split.net, 0),
       last: list.map((c) => c.day).filter(Boolean).sort().pop() || '',
       ago: a.lastSync ? (now - Date.parse(a.lastSync)) / 3600000 : Infinity,
     });
@@ -326,17 +332,17 @@ function monitorPage(isAdmin) {
   const balance = accounts.reduce((t, a) => t + (Number(a.balance) || 0), 0);
   const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
   const cards = [
-    ['To settle (all accounts)', cents(T.gross), plural(openN, 'cash-out', 'cash-outs') + ' · ' + cents(settledAll) + ' settled'],
-    [`Worker to pay (${SPLIT.worker}%)`, cents(T.worker), `After the ${cents(FEE_CENTS)} fee per cash-out`],
-    [`Buyer to pay (${SPLIT.buyer}%)`, cents(T.buyer), 'Full share, no fee'],
-    [`VPS to pay (${SPLIT.vps}%)`, cents(T.vps), 'Full share, no fee'],
+    ['To settle (received)', cents(T.net), cents(T.gross) + ' sent − ' + cents(T.fee) + ' fees · ' + plural(openN, 'cash-out', 'cash-outs')],
+    [`Worker to pay (${SPLIT.worker}%)`, cents(T.worker), `${SPLIT.worker}% of received`],
+    [`Buyer to pay (${SPLIT.buyer}%)`, cents(T.buyer), `${SPLIT.buyer}% of received`],
+    [`VPS to pay (${SPLIT.vps}%)`, cents(T.vps), `${SPLIT.vps}% of received`],
     ['On the way', money(accounts.reduce((t, a) => t + a.comingSum, 0)), 'Not split until paid'],
     ['Balance (all accounts)', money(balance), plural(accounts.length, 'account', 'accounts')],
   ].map((c) => `<div class="card"><div class="label">${c[0]}</div><div class="big">${c[1]}</div><div class="muted">${c[2]}</div></div>`).join('');
 
-  const splitTds = (sp, cls) => ['fee', 'worker', 'buyer', 'vps']
-    .map((k) => `<td class="num${k === 'fee' ? '' : ' share'}${cls ? ' ' + cls : ''}">${sp ? cents(sp[k]) : '–'}</td>`).join('');
-  const SPLIT_TH = `<th class="num">Fee</th><th class="num">Worker</th><th class="num">Buyer</th><th class="num">VPS</th>`;
+  const splitTds = (sp, cls) => ['fee', 'net', 'worker', 'buyer', 'vps']
+    .map((k) => `<td class="num${k === 'fee' || k === 'net' ? '' : ' share'}${cls ? ' ' + cls : ''}">${sp ? cents(sp[k]) : '–'}</td>`).join('');
+  const SPLIT_TH = `<th class="num">Fee</th><th class="num">Received</th><th class="num">Worker</th><th class="num">Buyer</th><th class="num">VPS</th>`;
 
   const idRows = accounts.map((a) => {
     const stale = a.ago > STALE_HOURS;
@@ -348,7 +354,7 @@ function monitorPage(isAdmin) {
       + `<td class="${stale ? 'stale' : 'muted'}" title="${esc(a.lastSync || '')}">${agoText(a.ago)}${stale ? ' ⚠' : ''}</td></tr>`;
   }).join('');
   const idTotal = `<tr class="total"><td colspan="2"><b>Total</b></td><td class="num"><b>${cents(T.gross)}</b></td><td class="num"><b>${openN}</b></td>`
-    + ['fee', 'worker', 'buyer', 'vps'].map((k) => `<td class="num"><b>${cents(T[k])}</b></td>`).join('')
+    + ['fee', 'net', 'worker', 'buyer', 'vps'].map((k) => `<td class="num"><b>${cents(T[k])}</b></td>`).join('')
     + `<td class="num"><b>${cents(settledAll)}</b></td><td colspan="4"></td></tr>`;
 
   const months = {};
@@ -380,7 +386,7 @@ function monitorPage(isAdmin) {
     + `<td class="num">${money(c.amount)}</td>${splitTds(c.split, c.status === 'DELIVERED' ? '' : 'exp')}`
     + `<td><span class="pill ${pillClass(c.status)}">${esc(c.statusText)}</span></td>${settleCell(c)}</tr>`).join('');
 
-  const rule = `Split: Worker ${SPLIT.worker}% · Buyer ${SPLIT.buyer}% · VPS ${SPLIT.vps}% · ${cents(FEE_CENTS)} fee per cash-out, taken from Worker only`;
+  const rule = `Each cash-out: ${cents(FEE_CENTS)} fee comes off first, then the received amount is split Worker ${SPLIT.worker}% · Buyer ${SPLIT.buyer}% · VPS ${SPLIT.vps}%`;
   const adminJs = !isAdmin ? '' : `
   function save(ids, settled) {
     document.querySelectorAll('input.settle, #bulk').forEach(function (x) { x.disabled = true; });
@@ -405,10 +411,10 @@ function monitorPage(isAdmin) {
 <div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">${esc(rule)}<br>Settled cash-outs are not counted in the amounts to pay. Refreshes automatically every minute.</p></div><div class="links">${links}</div></div>
 <section class="cards">${cards}</section>
 <h2>By account (to settle)</h2>
-<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">To settle</th><th class="num">Count</th>${SPLIT_TH}<th class="num">Settled</th><th class="num">On the way</th><th class="num">Balance</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}${accounts.length > 1 ? idTotal : ''}</tbody></table></div>
-${monthRows ? `<h2>By month (all paid, settled or not)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Paid</th><th class="num">Count</th>${SPLIT_TH}</tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
+<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">Sent</th><th class="num">Count</th>${SPLIT_TH}<th class="num" title="Received amount already settled">Settled</th><th class="num">On the way</th><th class="num">Balance</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}${accounts.length > 1 ? idTotal : ''}</tbody></table></div>
+${monthRows ? `<h2>By month (all paid, settled or not)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Sent</th><th class="num">Count</th>${SPLIT_TH}</tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
 <div class="row"><h2>All cash-outs</h2><div class="filters">${isAdmin ? '<button type="button" id="bulk">Mark shown as settled</button>' : ''}<select id="s" aria-label="Settled"><option value="">All cash-outs</option><option value="open">Not settled</option><option value="done">Settled</option></select><select id="f" aria-label="RDP"><option value="">All RDPs</option>${options}</select></div></div>
-<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Amount</th>${SPLIT_TH}<th>Status</th><th>Settled</th></tr></thead><tbody>${cashRows || '<tr><td colspan="10" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
+<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Sent</th>${SPLIT_TH}<th>Status</th><th>Settled</th></tr></thead><tbody>${cashRows || '<tr><td colspan="11" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
 <p class="muted">Italic amounts are not paid yet. Canceled and failed cash-outs are not split.${isAdmin ? ' Tick a paid cash-out once you have paid Worker, Buyer and VPS for it.' : ''}</p>
 <script>
 (function () {
@@ -537,6 +543,6 @@ server.on('error', (e) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Piper Cash-out Monitor cholche: http://0.0.0.0:${PORT}  (data: ${DATA_FILE})`);
-  console.log(`Taka bhag: Worker ${SPLIT.worker}%, Buyer ${SPLIT.buyer}%, VPS ${SPLIT.vps}%, fee $${(FEE_CENTS / 100).toFixed(2)} (shudhu Worker theke)`);
+  console.log(`Taka bhag: Worker ${SPLIT.worker}%, Buyer ${SPLIT.buyer}%, VPS ${SPLIT.vps}%, age fee $${(FEE_CENTS / 100).toFixed(2)} kate, tarpor received er bhag`);
   console.log(ADMIN_PASSWORD ? 'Admin: chalu (admin password diye Settled tick deya jabe)' : 'Admin: bondho (--admin-password na dile Settled tick deya jabe na)');
 });

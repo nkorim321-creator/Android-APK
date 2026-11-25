@@ -116,10 +116,11 @@ Browser e server er link khulle (password diye) monitor page dekhay:
 
 Monitor protita Paid cash-out ke bhag kore dekhay:
 
-- Worker 50%, Buyer 25%, VPS 25%.
-- Protita cash-out e $0.50 fee, puro ta Worker theke kate. Buyer ar VPS fee chara puro 25% pay.
-- Jemon $10 cash-out: Worker $4.50, Buyer $2.50, VPS $2.50, fee $0.50.
-- Cent er bhagta emon vabe dewa hoy jate Fee + Worker + Buyer + VPS sob somoy cash-out er shoman hoy.
+- Protita cash-out theke age $0.50 fee kate. Baki ta **Received**.
+- Received taka Worker 50%, Buyer 25%, VPS 25%.
+- Jemon $11.12 cash-out: Received $10.62, Worker $5.31, Buyer $2.66, VPS $2.65.
+- Adha cent hole (jemon $10.62 er 25% = $2.655) ekjon 1 cent beshi pay, jate Worker + Buyer + VPS sob somoy Received er shoman hoy.
+- Table e Sent, Fee, Received, Worker, Buyer, VPS alada column e thake.
 - "On its way" cash-out er hisab italic e dekhay, total e dhora hoy na. Canceled ar failed er bhag hoy na.
 
 Percent ba fee bodlate server chalanor command e jog koro, jemon `--worker 50 --buyer 25 --vps 25 --fee 0.50`. Worker + Buyer + VPS mile 100 hote hobe.
