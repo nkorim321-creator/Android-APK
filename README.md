@@ -112,6 +112,18 @@ Browser e server er link khulle (password diye) monitor page dekhay:
 - **Mash onujayi:** kon mash e koto dollar paid hoyeche.
 - **Sob cash-out:** tarikh, RDP, account, dollar ar status. Upore RDP bachai kore shudhu oi RDP er gula dekha jay.
 
+### Taka bhag (Worker / Buyer / VPS)
+
+Monitor protita Paid cash-out ke bhag kore dekhay:
+
+- Worker 50%, Buyer 25%, VPS 25%.
+- Protita cash-out e $0.50 fee. Fee Worker ar Buyer adha adha dey ($0.25 kore). VPS fee chara puro 25% pay.
+- Jemon $10 cash-out: Worker $4.75, Buyer $2.25, VPS $2.50, fee $0.50.
+- Cent er bhagta emon vabe dewa hoy jate Fee + Worker + Buyer + VPS sob somoy cash-out er shoman hoy.
+- "On its way" cash-out er hisab italic e dekhay, total e dhora hoy na. Canceled ar failed er bhag hoy na.
+
+Percent ba fee bodlate server chalanor command e jog koro, jemon `--worker 50 --buyer 25 --vps 25 --fee 0.50`. Worker + Buyer + VPS mile 100 hote hobe.
+
 Page protiti 1 minute e nijei refresh hoy. Script protita RDP te 45-90 minute e ekbar data pathay.
 Script shudhu pore: cash-out request ba "Redeem your reward" kokhono chape na, reward er link o pathay na.
 

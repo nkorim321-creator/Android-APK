@@ -8,6 +8,10 @@
  * Chalao:
  *   node server.js --port 3200 --password tomar-password
  *
+ * Taka bhag (default): Worker 50%, Buyer 25%, VPS 25%.
+ * Protita cash-out e $0.50 fee: Worker ar Buyer adha adha dey, VPS puro 25% pay.
+ * Bodlate chaile:  --worker 50 --buyer 25 --vps 25 --fee 0.50
+ *
  * Kono npm package lage na, shudhu Node.js (16 ba notun).
  * Data ei folder er cashout-data.json file e thake.
  */
@@ -33,8 +37,22 @@ const MAX_BODY = 1024 * 1024;       // 1 MB
 const COMING = ['PENDING', 'PROCESSING', 'FLAGGED'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Taka bhag
+function pct(name, def) {
+  const v = arg(name);
+  return v === undefined ? def : Number(v);
+}
+const SPLIT = { worker: pct('worker', 50), buyer: pct('buyer', 25), vps: pct('vps', 25), fee: pct('fee', 0.5) };
+const FEE_CENTS = Math.round(SPLIT.fee * 100);
+
 if (!PASSWORD) {
   console.error('Password dao. Jemon:  node server.js --port 3200 --password tomar-password');
+  process.exit(1);
+}
+if (['worker', 'buyer', 'vps', 'fee'].some((k) => !isFinite(SPLIT[k]) || SPLIT[k] < 0)
+    || Math.abs(SPLIT.worker + SPLIT.buyer + SPLIT.vps - 100) > 1e-9) {
+  console.error('Taka bhag thik na: --worker + --buyer + --vps mile 100 hote hobe, ar --fee 0 ba beshi. Ekhon: '
+    + `worker ${SPLIT.worker}, buyer ${SPLIT.buyer}, vps ${SPLIT.vps}, fee ${SPLIT.fee}`);
   process.exit(1);
 }
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
@@ -183,22 +201,44 @@ function agoText(hours) {
 }
 const rdpNo = (s) => { const m = /(\d+)/.exec(String(s)); return m ? Number(m[1]) : 9999; };
 const sum = (arr) => arr.reduce((t, c) => t + (Number(c.amount) || 0), 0);
+const cents = (n) => money(n / 100);
+
+// Ek cash-out er bhag, cent e. VPS fee chara puro bhag pay; fee Worker ar Buyer adha adha dey.
+// Cent er bhagta (round) Worker ar Buyer er moddhe emon vabe dei jate sob mile cash-out er shoman hoy.
+function splitCents(amount) {
+  const gross = Math.round((Number(amount) || 0) * 100);
+  const fee = Math.min(FEE_CENTS, gross);
+  const vps = Math.round(gross * SPLIT.vps / 100);
+  const wExact = gross * SPLIT.worker / 100 - fee / 2;
+  const bExact = gross * SPLIT.buyer / 100 - fee / 2;
+  let worker = Math.floor(wExact);
+  let buyer = Math.floor(bExact);
+  let left = gross - fee - vps - worker - buyer;       // 0, 1 ba 2 cent
+  const workerFirst = wExact - worker >= bExact - buyer;
+  for (let i = 0; left > 0; i++, left--) {
+    if ((i % 2 === 0) === workerFirst) worker++; else buyer++;
+  }
+  return { gross, fee, worker, buyer, vps };
+}
+const addSplit = (t, s) => { ['gross', 'fee', 'worker', 'buyer', 'vps'].forEach((k) => { t[k] += s[k]; }); return t; };
+const zeroSplit = () => ({ gross: 0, fee: 0, worker: 0, buyer: 0, vps: 0 });
 const pillClass = (st) => (st === 'DELIVERED' ? 'ok' : st === 'CANCELED' || st === 'FAILED' ? 'bad' : 'wait');
 
 const CSS = `
 :root{--bg:#f6f4ef;--card:#fff;--fg:#1d1b19;--muted:#6f6a64;--line:#e4dfd7;--ok:#2f7a3e;--okbg:#e3f1e5;--bad:#b3261e;--badbg:#fbe4e2;--wait:#7a5a00;--waitbg:#fbf0cf;--btn:#1d1b19;--btnfg:#fff}
 @media (prefers-color-scheme:dark){:root{--bg:#181412;--card:#231e1b;--fg:#f1eee7;--muted:#a59d94;--line:#3a332e;--ok:#9fd3a6;--okbg:#22382a;--bad:#f2a49d;--badbg:#3d2321;--wait:#e8cf86;--waitbg:#3a3220;--btn:#f1eee7;--btnfg:#181412}}
 *{box-sizing:border-box}body{margin:0;padding:20px 16px 40px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:1000px;margin:0 auto}h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}a{color:inherit}
+main{max-width:1200px;margin:0 auto}h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}a{color:inherit}
 .muted{color:var(--muted)}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:18px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+@media (max-width:820px){.cards{grid-template-columns:repeat(2,1fr)}}@media (max-width:480px){.card{padding:12px}.big{font-size:22px}}@media (max-width:340px){.cards{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}.label{color:var(--muted);font-size:12.5px}
 .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;margin:2px 0}
 .wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}.wrap.fit{display:inline-block;max-width:100%}
 table{width:100%;border-collapse:collapse;white-space:nowrap}table.narrow{width:auto;min-width:320px}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}th{font-size:12px;color:var(--muted);font-weight:600}
-tbody tr:last-child td{border-bottom:0}.num{text-align:right;font-variant-numeric:tabular-nums}
-.stale{color:var(--bad);font-weight:600}.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+tbody tr:last-child td{border-bottom:0}tr.total td{border-top:2px solid var(--line)}.num{text-align:right;font-variant-numeric:tabular-nums}
+.stale{color:var(--bad);font-weight:600}.exp{color:var(--muted);font-style:italic}.share{font-weight:600}.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
 .pill.ok{background:var(--okbg);color:var(--ok)}.pill.bad{background:var(--badbg);color:var(--bad)}.pill.wait{background:var(--waitbg);color:var(--wait)}
 .row{display:flex;align-items:center;justify-content:space-between;gap:12px}.row h2{margin-bottom:10px}
 select,input,button{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
@@ -220,13 +260,16 @@ ${error ? `<p class="err">${esc(error)}</p>` : ''}</div>`);
 
 function monitorPage() {
   const now = Date.now();
-  const all = Object.values(db.cashouts);
+  const all = Object.values(db.cashouts).map((c) => Object.assign({}, c, {
+    split: c.status === 'DELIVERED' || COMING.includes(c.status) ? splitCents(c.amount) : null,
+  }));
   const accounts = Object.entries(db.accounts).map(([key, a]) => {
     const list = all.filter((c) => c.key === key);
     const paid = list.filter((c) => c.status === 'DELIVERED');
     const coming = list.filter((c) => COMING.includes(c.status));
     return Object.assign({}, a, {
-      paidSum: sum(paid), paidN: paid.length, comingSum: sum(coming),
+      paidN: paid.length, comingSum: sum(coming),
+      split: paid.reduce((t, c) => addSplit(t, c.split), zeroSplit()),
       last: list.map((c) => c.day).filter(Boolean).sort().pop() || '',
       ago: a.lastSync ? (now - Date.parse(a.lastSync)) / 3600000 : Infinity,
     });
@@ -236,47 +279,63 @@ function monitorPage() {
     return page('Piper Cash-out Monitor', `<h1>Piper Cash-out Monitor</h1><p class="muted">No data yet. On each RDP, open piperpays.com, open the userscript menu (Tampermonkey or Violentmonkey) and click "💵 Cash-out monitor link set koro". Enter this server's address and password.</p><p><a href="/logout">Logout</a></p>`, true);
   }
 
-  const tot = (f) => accounts.reduce((t, a) => t + (Number(a[f]) || 0), 0);
+  const T = accounts.reduce((t, a) => addSplit(t, a.split), zeroSplit());
+  const paidN = accounts.reduce((t, a) => t + a.paidN, 0);
+  const balance = accounts.reduce((t, a) => t + (Number(a.balance) || 0), 0);
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
   const cards = [
-    ['Total paid (all accounts)', money(tot('paidSum')), tot('paidN') + (tot('paidN') === 1 ? ' cash-out' : ' cash-outs')],
-    ['On the way', money(tot('comingSum')), 'On its way / under review'],
-    ['Balance (all accounts)', money(tot('balance')), accounts.length + (accounts.length === 1 ? ' account' : ' accounts')],
+    ['Total paid (all accounts)', cents(T.gross), plural(paidN, 'cash-out', 'cash-outs') + ' · ' + cents(T.fee) + ' fees'],
+    [`Worker (${SPLIT.worker}%)`, cents(T.worker), 'After half of the fees'],
+    [`Buyer (${SPLIT.buyer}%)`, cents(T.buyer), 'After half of the fees'],
+    [`VPS (${SPLIT.vps}%)`, cents(T.vps), 'No fee taken'],
+    ['On the way', money(accounts.reduce((t, a) => t + a.comingSum, 0)), 'Not split until paid'],
+    ['Balance (all accounts)', money(balance), plural(accounts.length, 'account', 'accounts')],
   ].map((c) => `<div class="card"><div class="label">${c[0]}</div><div class="big">${c[1]}</div><div class="muted">${c[2]}</div></div>`).join('');
+
+  const splitTds = (sp, cls) => ['fee', 'worker', 'buyer', 'vps']
+    .map((k) => `<td class="num${k === 'fee' ? '' : ' share'}${cls ? ' ' + cls : ''}">${sp ? cents(sp[k]) : '–'}</td>`).join('');
+  const SPLIT_TH = `<th class="num">Fee</th><th class="num">Worker</th><th class="num">Buyer</th><th class="num">VPS</th>`;
 
   const idRows = accounts.map((a) => {
     const stale = a.ago > STALE_HOURS;
-    return `<tr><td><b>${esc(a.rdp)}</b></td><td>${esc(a.account)}</td><td class="num">${money(a.paidSum)}</td><td class="num">${a.paidN}</td>`
+    return `<tr><td><b>${esc(a.rdp)}</b></td><td>${esc(a.account)}</td><td class="num">${cents(a.split.gross)}</td><td class="num">${a.paidN}</td>`
+      + splitTds(a.paidN ? a.split : null)
       + `<td class="num">${a.comingSum ? money(a.comingSum) : '–'}</td><td class="num">${a.balance == null ? '–' : money(a.balance)}</td>`
-      + `<td class="num">${a.lifetime == null ? '–' : money(a.lifetime)}</td><td>${fmtDay(a.last)}</td>`
+      + `<td>${fmtDay(a.last)}</td>`
       + `<td class="${stale ? 'stale' : 'muted'}" title="${esc(a.lastSync || '')}">${agoText(a.ago)}${stale ? ' ⚠' : ''}</td></tr>`;
   }).join('');
+  const idTotal = `<tr class="total"><td colspan="2"><b>Total</b></td><td class="num"><b>${cents(T.gross)}</b></td><td class="num"><b>${paidN}</b></td>`
+    + ['fee', 'worker', 'buyer', 'vps'].map((k) => `<td class="num"><b>${cents(T[k])}</b></td>`).join('') + '<td colspan="4"></td></tr>';
 
   const months = {};
   all.filter((c) => c.status === 'DELIVERED' && c.day).forEach((c) => {
     const k = c.day.slice(0, 7);
-    months[k] = months[k] || { sum: 0, n: 0 };
-    months[k].sum += Number(c.amount) || 0;
+    months[k] = months[k] || Object.assign(zeroSplit(), { n: 0 });
+    addSplit(months[k], c.split);
     months[k].n += 1;
   });
   const monthRows = Object.keys(months).sort().reverse().map((k) => {
     const [y, m] = k.split('-');
-    return `<tr><td>${MONTHS[Number(m) - 1]} ${y}</td><td class="num">${money(months[k].sum)}</td><td class="num">${months[k].n}</td></tr>`;
+    return `<tr><td>${MONTHS[Number(m) - 1]} ${y}</td><td class="num">${cents(months[k].gross)}</td><td class="num">${months[k].n}</td>${splitTds(months[k])}</tr>`;
   }).join('');
 
   const list = all.slice().sort((x, y) => (y.day || '').localeCompare(x.day || '') || rdpNo(x.rdp) - rdpNo(y.rdp));
   const rdps = Array.from(new Set(list.map((c) => c.rdp))).sort((x, y) => rdpNo(x) - rdpNo(y));
   const options = rdps.map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
   const cashRows = list.map((c) => `<tr data-rdp="${esc(c.rdp)}"><td>${fmtDay(c.day)}</td><td><b>${esc(c.rdp)}</b></td><td>${esc(c.account)}</td>`
-    + `<td class="num">${money(c.amount)}</td><td><span class="pill ${pillClass(c.status)}">${esc(c.statusText)}</span></td></tr>`).join('');
+    + `<td class="num">${money(c.amount)}</td>${splitTds(c.split, c.status === 'DELIVERED' ? '' : 'exp')}`
+    + `<td><span class="pill ${pillClass(c.status)}">${esc(c.statusText)}</span></td></tr>`).join('');
 
+  const rule = `Split: Worker ${SPLIT.worker}% · Buyer ${SPLIT.buyer}% · VPS ${SPLIT.vps}% · ${cents(FEE_CENTS)} fee per cash-out, paid half by Worker and half by Buyer`;
   const body = `
-<div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">Refreshes automatically every minute</p></div><a class="muted" href="/logout">Logout</a></div>
+<div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">${esc(rule)}<br>Refreshes automatically every minute</p></div><a class="muted" href="/logout">Logout</a></div>
 <section class="cards">${cards}</section>
-<h2>By account</h2>
-<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">Total paid</th><th class="num">Count</th><th class="num">On the way</th><th class="num">Balance</th><th class="num">Lifetime</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}</tbody></table></div>
-${monthRows ? `<h2>By month (paid)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Amount</th><th class="num">Count</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
+<h2>By account (paid)</h2>
+<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">Paid</th><th class="num">Count</th>${SPLIT_TH}<th class="num">On the way</th><th class="num">Balance</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}${accounts.length > 1 ? idTotal : ''}</tbody></table></div>
+${monthRows ? `<h2>By month (paid)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Paid</th><th class="num">Count</th>${SPLIT_TH}</tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
 <div class="row"><h2>All cash-outs</h2><select id="f" aria-label="RDP"><option value="">All RDPs</option>${options}</select></div>
-<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>${cashRows || '<tr><td colspan="5" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
+<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Amount</th>${SPLIT_TH}<th>Status</th></tr></thead><tbody>${cashRows || '<tr><td colspan="9" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
+<p class="muted">Italic amounts are not paid yet. Canceled and failed cash-outs are not split.</p>
 <script>
 (function () {
   var f = document.getElementById('f');
@@ -359,4 +418,5 @@ server.on('error', (e) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Piper Cash-out Monitor cholche: http://0.0.0.0:${PORT}  (data: ${DATA_FILE})`);
+  console.log(`Taka bhag: Worker ${SPLIT.worker}%, Buyer ${SPLIT.buyer}%, VPS ${SPLIT.vps}%, fee $${(FEE_CENTS / 100).toFixed(2)} (Worker ar Buyer adha adha)`);
 });
