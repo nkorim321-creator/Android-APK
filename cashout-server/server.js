@@ -6,10 +6,13 @@
  * Browser e server er link khulle (password diye) monitor page dekhay.
  *
  * Chalao:
- *   node server.js --port 3200 --password tomar-password
+ *   node server.js --port 3200 --password tomar-password --admin-password admin-er-password
+ *
+ * --password: monitor dekhar password.
+ * --admin-password: shudhu admin; cash-out "Settled" tick dite lage. Na dile tick kora jay na.
  *
  * Taka bhag (default): Worker 50%, Buyer 25%, VPS 25%.
- * Protita cash-out e $0.50 fee: Worker ar Buyer adha adha dey, VPS puro 25% pay.
+ * Protita cash-out e $0.50 fee shudhu Worker theke kate. Buyer ar VPS puro bhag pay.
  * Bodlate chaile:  --worker 50 --buyer 25 --vps 25 --fee 0.50
  *
  * Kono npm package lage na, shudhu Node.js (16 ba notun).
@@ -31,6 +34,7 @@ function arg(name) {
 }
 const PORT = Number(arg('port') || process.env.PORT || 3200);
 const PASSWORD = String(arg('password') || process.env.PASSWORD || '');
+const ADMIN_PASSWORD = String(arg('admin-password') || process.env.ADMIN_PASSWORD || '');
 const DATA_FILE = arg('data') || process.env.DATA_FILE || path.join(__dirname, 'cashout-data.json');
 const STALE_HOURS = 3;              // ei koto ghonta data na ashle lal ⚠
 const MAX_BODY = 1024 * 1024;       // 1 MB
@@ -47,6 +51,10 @@ const FEE_CENTS = Math.round(SPLIT.fee * 100);
 
 if (!PASSWORD) {
   console.error('Password dao. Jemon:  node server.js --port 3200 --password tomar-password');
+  process.exit(1);
+}
+if (ADMIN_PASSWORD && ADMIN_PASSWORD === PASSWORD) {
+  console.error('Admin password ar monitor password alada hote hobe, na hole je monitor dekhe se-o tick dite parbe.');
   process.exit(1);
 }
 if (['worker', 'buyer', 'vps', 'fee'].some((k) => !isFinite(SPLIT[k]) || SPLIT[k] < 0)
@@ -74,6 +82,7 @@ try {
 }
 db.accounts = db.accounts || {};
 db.cashouts = db.cashouts || {};
+db.settled = db.settled || {};     // cash-out id -> kokhon "Settled" tick deya hoyeche
 
 function save() {
   const tmp = DATA_FILE + '.tmp';
@@ -83,16 +92,19 @@ function save() {
 
 const num = (v) => (v == null || v === '' || isNaN(Number(v)) ? null : Math.round(Number(v) * 100) / 100);
 const str = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+const badKey = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 // RDP theke asha data sheet e boshai. Ek-i cash-out (id) abar ashle update hoy, duplicate hoy na.
 function upsert(data) {
   const account = str(data && data.account, 60);
   if (!account || !Array.isArray(data.payouts)) throw Object.assign(new Error('account ba cash-out list nai'), { status: 400 });
   const key = account.toLowerCase();
+  if (badKey(key)) throw Object.assign(new Error('account er naam thik na'), { status: 400 });
   const rdp = str(data.rdp, 30) || 'RDP ??';
   data.payouts.slice(0, 5000).forEach((p) => {
     const id = str(p && p.id, 100);
-    if (!id) return;
+    if (!id || badKey(id)) return;
     db.cashouts[id] = {
       id, key, rdp, account,
       day: /^\d{4}-\d{2}-\d{2}$/.test(String(p.day)) ? p.day : '',
@@ -134,17 +146,35 @@ function cookieOk(req) {
   return c.length === COOKIE_VALUE.length && crypto.timingSafeEqual(Buffer.from(c), Buffer.from(COOKIE_VALUE));
 }
 
-// Bhul password onekbar dile (15 minute e 20 bar) oi IP ke kichukkhon atkai.
-const fails = new Map();
-const FAIL_WINDOW = 15 * 60 * 1000;
-function blocked(ip) {
-  const f = fails.get(ip);
-  if (f && Date.now() - f.since > FAIL_WINDOW) { fails.delete(ip); return false; }
-  return !!f && f.n >= 20;
+// Admin: alada password ar alada cookie. Cookie te password thake na, thake tar HMAC.
+const ADMIN_HASH = ADMIN_PASSWORD ? sha(ADMIN_PASSWORD) : null;
+const adminKeyOk = (k) => !!ADMIN_HASH && typeof k === 'string' && k.length > 0 && crypto.timingSafeEqual(sha(k), ADMIN_HASH);
+const ADMIN_COOKIE = 'piper_admin';
+const ADMIN_VALUE = ADMIN_PASSWORD ? crypto.createHmac('sha256', ADMIN_PASSWORD).update('piper-admin|' + PASSWORD).digest('hex') : '';
+function adminOk(req) {
+  if (!ADMIN_VALUE) return false;
+  const c = cookies(req)[ADMIN_COOKIE] || '';
+  return c.length === ADMIN_VALUE.length && crypto.timingSafeEqual(Buffer.from(c), Buffer.from(ADMIN_VALUE));
 }
-function failed(ip) {
-  const f = fails.get(ip);
-  if (!f || Date.now() - f.since > FAIL_WINDOW) fails.set(ip, { n: 1, since: Date.now() });
+// Onno website theke admin er hoye request pathano atkay.
+function sameOrigin(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  try { return new URL(o).host === req.headers.host; } catch (_) { return false; }
+}
+
+// Bhul password onekbar dile oi IP ke 15 minute atkai: monitor password e 20 bar, admin e 5 bar.
+const FAIL_WINDOW = 15 * 60 * 1000;
+const fails = new Map();
+const adminFails = new Map();
+function blocked(ip, map = fails, limit = 20) {
+  const f = map.get(ip);
+  if (f && Date.now() - f.since > FAIL_WINDOW) { map.delete(ip); return false; }
+  return !!f && f.n >= limit;
+}
+function failed(ip, map = fails) {
+  const f = map.get(ip);
+  if (!f || Date.now() - f.since > FAIL_WINDOW) map.set(ip, { n: 1, since: Date.now() });
   else f.n += 1;
 }
 
@@ -178,6 +208,8 @@ function readBody(req) {
 }
 
 const loginCookie = () => `${COOKIE}=${COOKIE_VALUE}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`;
+const adminCookie = () => `${ADMIN_COOKIE}=${ADMIN_VALUE}; Path=/; Max-Age=43200; HttpOnly; SameSite=Strict`;
+const clearAdminCookie = `${ADMIN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`;
 
 // ---------------------------------------------------------------------------
 // Page
@@ -203,21 +235,14 @@ const rdpNo = (s) => { const m = /(\d+)/.exec(String(s)); return m ? Number(m[1]
 const sum = (arr) => arr.reduce((t, c) => t + (Number(c.amount) || 0), 0);
 const cents = (n) => money(n / 100);
 
-// Ek cash-out er bhag, cent e. VPS fee chara puro bhag pay; fee Worker ar Buyer adha adha dey.
-// Cent er bhagta (round) Worker ar Buyer er moddhe emon vabe dei jate sob mile cash-out er shoman hoy.
+// Ek cash-out er bhag, cent e. Buyer ar VPS puro bhag pay; fee shudhu Worker theke kate.
+// Baki cent Worker pay, tai sob mile sob somoy cash-out er shoman hoy.
 function splitCents(amount) {
   const gross = Math.round((Number(amount) || 0) * 100);
   const fee = Math.min(FEE_CENTS, gross);
   const vps = Math.round(gross * SPLIT.vps / 100);
-  const wExact = gross * SPLIT.worker / 100 - fee / 2;
-  const bExact = gross * SPLIT.buyer / 100 - fee / 2;
-  let worker = Math.floor(wExact);
-  let buyer = Math.floor(bExact);
-  let left = gross - fee - vps - worker - buyer;       // 0, 1 ba 2 cent
-  const workerFirst = wExact - worker >= bExact - buyer;
-  for (let i = 0; left > 0; i++, left--) {
-    if ((i % 2 === 0) === workerFirst) worker++; else buyer++;
-  }
+  const buyer = Math.round(gross * SPLIT.buyer / 100);
+  const worker = gross - fee - vps - buyer;
   return { gross, fee, worker, buyer, vps };
 }
 const addSplit = (t, s) => { ['gross', 'fee', 'worker', 'buyer', 'vps'].forEach((k) => { t[k] += s[k]; }); return t; };
@@ -244,7 +269,10 @@ tbody tr:last-child td{border-bottom:0}tr.total td{border-top:2px solid var(--li
 select,input,button{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
 button{background:var(--btn);color:var(--btnfg);border-color:var(--btn);font-weight:600;cursor:pointer}
 .login{max-width:360px;margin:12vh auto 0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}
-.login form{display:flex;flex-direction:column;gap:10px;margin-top:14px}.err{color:var(--bad);margin:10px 0 0}`;
+.login form{display:flex;flex-direction:column;gap:10px;margin-top:14px}.err{color:var(--bad);margin:10px 0 0}
+.links{display:flex;gap:14px;align-items:center;white-space:nowrap}.admin{color:var(--ok);font-weight:700}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}tr.done td{opacity:.55}
+.tick{display:inline-flex;gap:6px;align-items:center;cursor:pointer}.tick input{width:18px;height:18px;padding:0;margin:0;accent-color:var(--ok);cursor:pointer}`;
 
 function page(title, body, refresh) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`
@@ -258,36 +286,50 @@ function loginPage(error) {
 ${error ? `<p class="err">${esc(error)}</p>` : ''}</div>`);
 }
 
-function monitorPage() {
+function adminLoginPage(error) {
+  return page('Admin login', `<div class="login"><h1>Admin login</h1><p class="muted">Admin can mark cash-outs as settled.</p>
+<form method="post" action="/admin/login"><input type="password" name="password" autocomplete="off" autofocus required aria-label="Admin password"><button type="submit">Login</button></form>
+${error ? `<p class="err">${esc(error)}</p>` : ''}<p><a class="muted" href="/">Back to monitor</a></p></div>`);
+}
+
+function monitorPage(isAdmin) {
   const now = Date.now();
   const all = Object.values(db.cashouts).map((c) => Object.assign({}, c, {
     split: c.status === 'DELIVERED' || COMING.includes(c.status) ? splitCents(c.amount) : null,
+    settledAt: c.status === 'DELIVERED' && has(db.settled, c.id) ? db.settled[c.id] : '',
   }));
+  const isOpen = (c) => c.status === 'DELIVERED' && !c.settledAt;   // paid, kintu ekhono bhag kore deya hoy nai
   const accounts = Object.entries(db.accounts).map(([key, a]) => {
     const list = all.filter((c) => c.key === key);
-    const paid = list.filter((c) => c.status === 'DELIVERED');
+    const open = list.filter(isOpen);
     const coming = list.filter((c) => COMING.includes(c.status));
     return Object.assign({}, a, {
-      paidN: paid.length, comingSum: sum(coming),
-      split: paid.reduce((t, c) => addSplit(t, c.split), zeroSplit()),
+      openN: open.length, comingSum: sum(coming),
+      split: open.reduce((t, c) => addSplit(t, c.split), zeroSplit()),
+      settled: list.filter((c) => c.settledAt).reduce((t, c) => t + c.split.gross, 0),
       last: list.map((c) => c.day).filter(Boolean).sort().pop() || '',
       ago: a.lastSync ? (now - Date.parse(a.lastSync)) / 3600000 : Infinity,
     });
   }).sort((x, y) => rdpNo(x.rdp) - rdpNo(y.rdp) || x.account.localeCompare(y.account));
 
+  const links = (ADMIN_PASSWORD ? (isAdmin
+    ? '<span class="admin">Admin</span><a class="muted" href="/admin/logout">Exit admin</a>'
+    : '<a class="muted" href="/admin">Admin login</a>') : '') + '<a class="muted" href="/logout">Logout</a>';
+
   if (!accounts.length) {
-    return page('Piper Cash-out Monitor', `<h1>Piper Cash-out Monitor</h1><p class="muted">No data yet. On each RDP, open piperpays.com, open the userscript menu (Tampermonkey or Violentmonkey) and click "💵 Cash-out monitor link set koro". Enter this server's address and password.</p><p><a href="/logout">Logout</a></p>`, true);
+    return page('Piper Cash-out Monitor', `<div class="top"><h1>Piper Cash-out Monitor</h1><div class="links">${links}</div></div><p class="muted">No data yet. On each RDP, open piperpays.com, open the userscript menu (Tampermonkey or Violentmonkey) and click "💵 Cash-out monitor link set koro". Enter this server's address and password.</p>`, true);
   }
 
   const T = accounts.reduce((t, a) => addSplit(t, a.split), zeroSplit());
-  const paidN = accounts.reduce((t, a) => t + a.paidN, 0);
+  const openN = accounts.reduce((t, a) => t + a.openN, 0);
+  const settledAll = accounts.reduce((t, a) => t + a.settled, 0);
   const balance = accounts.reduce((t, a) => t + (Number(a.balance) || 0), 0);
   const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
   const cards = [
-    ['Total paid (all accounts)', cents(T.gross), plural(paidN, 'cash-out', 'cash-outs') + ' · ' + cents(T.fee) + ' fees'],
-    [`Worker (${SPLIT.worker}%)`, cents(T.worker), 'After half of the fees'],
-    [`Buyer (${SPLIT.buyer}%)`, cents(T.buyer), 'After half of the fees'],
-    [`VPS (${SPLIT.vps}%)`, cents(T.vps), 'No fee taken'],
+    ['To settle (all accounts)', cents(T.gross), plural(openN, 'cash-out', 'cash-outs') + ' · ' + cents(settledAll) + ' settled'],
+    [`Worker to pay (${SPLIT.worker}%)`, cents(T.worker), `After the ${cents(FEE_CENTS)} fee per cash-out`],
+    [`Buyer to pay (${SPLIT.buyer}%)`, cents(T.buyer), 'Full share, no fee'],
+    [`VPS to pay (${SPLIT.vps}%)`, cents(T.vps), 'Full share, no fee'],
     ['On the way', money(accounts.reduce((t, a) => t + a.comingSum, 0)), 'Not split until paid'],
     ['Balance (all accounts)', money(balance), plural(accounts.length, 'account', 'accounts')],
   ].map((c) => `<div class="card"><div class="label">${c[0]}</div><div class="big">${c[1]}</div><div class="muted">${c[2]}</div></div>`).join('');
@@ -298,14 +340,16 @@ function monitorPage() {
 
   const idRows = accounts.map((a) => {
     const stale = a.ago > STALE_HOURS;
-    return `<tr><td><b>${esc(a.rdp)}</b></td><td>${esc(a.account)}</td><td class="num">${cents(a.split.gross)}</td><td class="num">${a.paidN}</td>`
-      + splitTds(a.paidN ? a.split : null)
+    return `<tr><td><b>${esc(a.rdp)}</b></td><td>${esc(a.account)}</td><td class="num">${cents(a.split.gross)}</td><td class="num">${a.openN}</td>`
+      + splitTds(a.openN ? a.split : null)
+      + `<td class="num">${a.settled ? cents(a.settled) : '–'}</td>`
       + `<td class="num">${a.comingSum ? money(a.comingSum) : '–'}</td><td class="num">${a.balance == null ? '–' : money(a.balance)}</td>`
       + `<td>${fmtDay(a.last)}</td>`
       + `<td class="${stale ? 'stale' : 'muted'}" title="${esc(a.lastSync || '')}">${agoText(a.ago)}${stale ? ' ⚠' : ''}</td></tr>`;
   }).join('');
-  const idTotal = `<tr class="total"><td colspan="2"><b>Total</b></td><td class="num"><b>${cents(T.gross)}</b></td><td class="num"><b>${paidN}</b></td>`
-    + ['fee', 'worker', 'buyer', 'vps'].map((k) => `<td class="num"><b>${cents(T[k])}</b></td>`).join('') + '<td colspan="4"></td></tr>';
+  const idTotal = `<tr class="total"><td colspan="2"><b>Total</b></td><td class="num"><b>${cents(T.gross)}</b></td><td class="num"><b>${openN}</b></td>`
+    + ['fee', 'worker', 'buyer', 'vps'].map((k) => `<td class="num"><b>${cents(T[k])}</b></td>`).join('')
+    + `<td class="num"><b>${cents(settledAll)}</b></td><td colspan="4"></td></tr>`;
 
   const months = {};
   all.filter((c) => c.status === 'DELIVERED' && c.day).forEach((c) => {
@@ -319,33 +363,70 @@ function monitorPage() {
     return `<tr><td>${MONTHS[Number(m) - 1]} ${y}</td><td class="num">${cents(months[k].gross)}</td><td class="num">${months[k].n}</td>${splitTds(months[k])}</tr>`;
   }).join('');
 
+  const shortDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${MONTHS[d.getMonth()]} ${d.getDate()}`; };
+  const settleCell = (c) => {
+    if (c.status !== 'DELIVERED') return '<td class="muted">–</td>';
+    if (isAdmin) {
+      return `<td><label class="tick"><input type="checkbox" class="settle" data-id="${esc(c.id)}"${c.settledAt ? ' checked' : ''} aria-label="Settled">`
+        + `<span class="muted">${c.settledAt ? shortDay(c.settledAt) : ''}</span></label></td>`;
+    }
+    return c.settledAt ? `<td><span class="pill ok">✓ ${shortDay(c.settledAt)}</span></td>` : '<td class="muted">Not yet</td>';
+  };
   const list = all.slice().sort((x, y) => (y.day || '').localeCompare(x.day || '') || rdpNo(x.rdp) - rdpNo(y.rdp));
   const rdps = Array.from(new Set(list.map((c) => c.rdp))).sort((x, y) => rdpNo(x) - rdpNo(y));
   const options = rdps.map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
-  const cashRows = list.map((c) => `<tr data-rdp="${esc(c.rdp)}"><td>${fmtDay(c.day)}</td><td><b>${esc(c.rdp)}</b></td><td>${esc(c.account)}</td>`
+  const cashRows = list.map((c) => `<tr data-rdp="${esc(c.rdp)}" data-state="${c.settledAt ? 'done' : isOpen(c) ? 'open' : ''}"${c.settledAt ? ' class="done"' : ''}>`
+    + `<td>${fmtDay(c.day)}</td><td><b>${esc(c.rdp)}</b></td><td>${esc(c.account)}</td>`
     + `<td class="num">${money(c.amount)}</td>${splitTds(c.split, c.status === 'DELIVERED' ? '' : 'exp')}`
-    + `<td><span class="pill ${pillClass(c.status)}">${esc(c.statusText)}</span></td></tr>`).join('');
+    + `<td><span class="pill ${pillClass(c.status)}">${esc(c.statusText)}</span></td>${settleCell(c)}</tr>`).join('');
 
-  const rule = `Split: Worker ${SPLIT.worker}% · Buyer ${SPLIT.buyer}% · VPS ${SPLIT.vps}% · ${cents(FEE_CENTS)} fee per cash-out, paid half by Worker and half by Buyer`;
+  const rule = `Split: Worker ${SPLIT.worker}% · Buyer ${SPLIT.buyer}% · VPS ${SPLIT.vps}% · ${cents(FEE_CENTS)} fee per cash-out, taken from Worker only`;
+  const adminJs = !isAdmin ? '' : `
+  function save(ids, settled) {
+    document.querySelectorAll('input.settle, #bulk').forEach(function (x) { x.disabled = true; });
+    fetch('/api/settle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids, settled: settled }) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status)); }); })
+      .then(function () { location.reload(); })
+      .catch(function (e) { alert('Could not save: ' + e.message); location.reload(); });
+  }
+  document.querySelectorAll('input.settle').forEach(function (cb) {
+    cb.addEventListener('change', function () { save([cb.getAttribute('data-id')], cb.checked); });
+  });
+  document.getElementById('bulk').addEventListener('click', function () {
+    var ids = [];
+    document.querySelectorAll('#list tbody tr').forEach(function (tr) {
+      var cb = tr.querySelector('input.settle');
+      if (cb && !cb.checked && tr.style.display !== 'none') ids.push(cb.getAttribute('data-id'));
+    });
+    if (!ids.length) { alert('Nothing to mark. All shown paid cash-outs are already settled.'); return; }
+    if (confirm('Mark ' + ids.length + ' shown cash-out' + (ids.length === 1 ? '' : 's') + ' as settled?')) save(ids, true);
+  });`;
   const body = `
-<div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">${esc(rule)}<br>Refreshes automatically every minute</p></div><a class="muted" href="/logout">Logout</a></div>
+<div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">${esc(rule)}<br>Settled cash-outs are not counted in the amounts to pay. Refreshes automatically every minute.</p></div><div class="links">${links}</div></div>
 <section class="cards">${cards}</section>
-<h2>By account (paid)</h2>
-<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">Paid</th><th class="num">Count</th>${SPLIT_TH}<th class="num">On the way</th><th class="num">Balance</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}${accounts.length > 1 ? idTotal : ''}</tbody></table></div>
-${monthRows ? `<h2>By month (paid)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Paid</th><th class="num">Count</th>${SPLIT_TH}</tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
-<div class="row"><h2>All cash-outs</h2><select id="f" aria-label="RDP"><option value="">All RDPs</option>${options}</select></div>
-<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Amount</th>${SPLIT_TH}<th>Status</th></tr></thead><tbody>${cashRows || '<tr><td colspan="9" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
-<p class="muted">Italic amounts are not paid yet. Canceled and failed cash-outs are not split.</p>
+<h2>By account (to settle)</h2>
+<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">To settle</th><th class="num">Count</th>${SPLIT_TH}<th class="num">Settled</th><th class="num">On the way</th><th class="num">Balance</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}${accounts.length > 1 ? idTotal : ''}</tbody></table></div>
+${monthRows ? `<h2>By month (all paid, settled or not)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Paid</th><th class="num">Count</th>${SPLIT_TH}</tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
+<div class="row"><h2>All cash-outs</h2><div class="filters">${isAdmin ? '<button type="button" id="bulk">Mark shown as settled</button>' : ''}<select id="s" aria-label="Settled"><option value="">All cash-outs</option><option value="open">Not settled</option><option value="done">Settled</option></select><select id="f" aria-label="RDP"><option value="">All RDPs</option>${options}</select></div></div>
+<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Amount</th>${SPLIT_TH}<th>Status</th><th>Settled</th></tr></thead><tbody>${cashRows || '<tr><td colspan="10" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
+<p class="muted">Italic amounts are not paid yet. Canceled and failed cash-outs are not split.${isAdmin ? ' Tick a paid cash-out once you have paid Worker, Buyer and VPS for it.' : ''}</p>
 <script>
 (function () {
-  var f = document.getElementById('f');
+  var f = document.getElementById('f'), st = document.getElementById('s');
   function apply() {
-    var v = f.value;
-    document.querySelectorAll('#list tbody tr[data-rdp]').forEach(function (tr) { tr.style.display = !v || tr.getAttribute('data-rdp') === v ? '' : 'none'; });
+    var v = f.value, w = st.value;
+    document.querySelectorAll('#list tbody tr[data-rdp]').forEach(function (tr) {
+      var show = (!v || tr.getAttribute('data-rdp') === v) && (!w || tr.getAttribute('data-state') === w);
+      tr.style.display = show ? '' : 'none';
+    });
   }
-  try { var saved = localStorage.getItem('rdpFilter'); if (saved && f.querySelector('option[value="' + saved.replace(/"/g, '') + '"]')) f.value = saved; } catch (e) {}
-  apply();
-  f.addEventListener('change', function () { try { localStorage.setItem('rdpFilter', f.value); } catch (e) {} apply(); });
+  function restore(el, key) {
+    try { var saved = localStorage.getItem(key); if (saved !== null && el.querySelector('option[value="' + saved.replace(/"/g, '') + '"]')) el.value = saved; } catch (e) {}
+    el.addEventListener('change', function () { try { localStorage.setItem(key, el.value); } catch (e) {} apply(); });
+  }
+  restore(f, 'rdpFilter');
+  restore(st, 'settledFilter');
+  apply();${adminJs}
 })();
 </script>`;
   return page('Piper Cash-out Monitor', body, true);
@@ -382,7 +463,45 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/logout') {
-      return send(res, 303, '', 'text/plain', { Location: '/', 'Set-Cookie': `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax` });
+      return send(res, 303, '', 'text/plain', { Location: '/', 'Set-Cookie': [`${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`, clearAdminCookie] });
+    }
+
+    // Admin: shudhu admin password diye "Settled" tick deya jay
+    if (url.pathname === '/admin' && req.method === 'GET') {
+      if (!cookieOk(req) || !ADMIN_PASSWORD) return send(res, 303, '', 'text/plain', { Location: '/' });
+      return send(res, 200, adminLoginPage(''));
+    }
+    if (url.pathname === '/admin/login' && req.method === 'POST') {
+      if (!cookieOk(req) || !ADMIN_PASSWORD) return send(res, 303, '', 'text/plain', { Location: '/' });
+      if (blocked(ip, adminFails, 5)) return send(res, 429, adminLoginPage('Too many wrong attempts. Try again in 15 minutes.'));
+      const pw = new URLSearchParams(await readBody(req)).get('password') || '';
+      if (!adminKeyOk(pw)) { failed(ip, adminFails); return send(res, 401, adminLoginPage('Wrong admin password')); }
+      console.log(new Date().toISOString(), 'admin login', ip);
+      return send(res, 303, '', 'text/plain', { Location: '/', 'Set-Cookie': adminCookie() });
+    }
+    if (url.pathname === '/admin/logout' && req.method === 'GET') {
+      return send(res, 303, '', 'text/plain', { Location: '/', 'Set-Cookie': clearAdminCookie });
+    }
+    if (url.pathname === '/api/settle' && req.method === 'POST') {
+      if (!adminOk(req) || !cookieOk(req)) return sendJson(res, 403, { ok: false, error: 'Admin only' });
+      if (!sameOrigin(req)) return sendJson(res, 403, { ok: false, error: 'Bad origin' });
+      let data;
+      try { data = JSON.parse(await readBody(req)); } catch (e) {
+        if (e.status) throw e;
+        return sendJson(res, 400, { ok: false, error: 'Bad data' });
+      }
+      const ids = Array.isArray(data && data.ids) ? data.ids.slice(0, 5000).map((x) => String(x)) : [];
+      if (!ids.length || typeof data.settled !== 'boolean') return sendJson(res, 400, { ok: false, error: 'Bad data' });
+      const at = new Date().toISOString();
+      let changed = 0;
+      ids.forEach((id) => {
+        if (badKey(id) || !has(db.cashouts, id) || db.cashouts[id].status !== 'DELIVERED') return;
+        if (data.settled && !has(db.settled, id)) { db.settled[id] = at; changed++; }
+        if (!data.settled && has(db.settled, id)) { delete db.settled[id]; changed++; }
+      });
+      if (changed) save();
+      console.log(at, data.settled ? 'settled' : 'unsettled', changed, 'ta cash-out');
+      return sendJson(res, 200, { ok: true, changed });
     }
 
     if (req.method === 'GET' && url.pathname === '/') {
@@ -394,7 +513,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 401, loginPage('Wrong password'));
       }
       if (!cookieOk(req)) return send(res, 200, loginPage(''));
-      return send(res, 200, monitorPage());
+      return send(res, 200, monitorPage(adminOk(req)));
     }
 
     if (req.method === 'GET' && url.pathname === '/api/data') {
@@ -418,5 +537,6 @@ server.on('error', (e) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Piper Cash-out Monitor cholche: http://0.0.0.0:${PORT}  (data: ${DATA_FILE})`);
-  console.log(`Taka bhag: Worker ${SPLIT.worker}%, Buyer ${SPLIT.buyer}%, VPS ${SPLIT.vps}%, fee $${(FEE_CENTS / 100).toFixed(2)} (Worker ar Buyer adha adha)`);
+  console.log(`Taka bhag: Worker ${SPLIT.worker}%, Buyer ${SPLIT.buyer}%, VPS ${SPLIT.vps}%, fee $${(FEE_CENTS / 100).toFixed(2)} (shudhu Worker theke)`);
+  console.log(ADMIN_PASSWORD ? 'Admin: chalu (admin password diye Settled tick deya jabe)' : 'Admin: bondho (--admin-password na dile Settled tick deya jabe na)');
 });

@@ -117,12 +117,25 @@ Browser e server er link khulle (password diye) monitor page dekhay:
 Monitor protita Paid cash-out ke bhag kore dekhay:
 
 - Worker 50%, Buyer 25%, VPS 25%.
-- Protita cash-out e $0.50 fee. Fee Worker ar Buyer adha adha dey ($0.25 kore). VPS fee chara puro 25% pay.
-- Jemon $10 cash-out: Worker $4.75, Buyer $2.25, VPS $2.50, fee $0.50.
+- Protita cash-out e $0.50 fee, puro ta Worker theke kate. Buyer ar VPS fee chara puro 25% pay.
+- Jemon $10 cash-out: Worker $4.50, Buyer $2.50, VPS $2.50, fee $0.50.
 - Cent er bhagta emon vabe dewa hoy jate Fee + Worker + Buyer + VPS sob somoy cash-out er shoman hoy.
 - "On its way" cash-out er hisab italic e dekhay, total e dhora hoy na. Canceled ar failed er bhag hoy na.
 
 Percent ba fee bodlate server chalanor command e jog koro, jemon `--worker 50 --buyer 25 --vps 25 --fee 0.50`. Worker + Buyer + VPS mile 100 hote hobe.
+
+### Settled tick (shudhu admin)
+
+Kono cash-out er taka Worker, Buyer ar VPS ke diye dile oi cash-out e **Settled** tick dao.
+
+- Tick deya cash-out upore box ("To settle", "Worker to pay", "Buyer to pay", "VPS to pay") ar "By account" er hisab theke bad jay. Mane upore shudhu ja ekhono dite baki seta dekhay.
+- "By month" e sob Paid cash-out thake, tick deya hok ba na hok.
+- Tick shudhu **admin** dite pare. Server chalanor somoy `--admin-password` dao. Monitor e **Admin login** e click kore oi password dao (12 ghonta mone rakhe).
+- Admin password server e thake, page e kokhono ashe na. Admin na hole page e checkbox-i thake na, ar Inspect diye checkbox banalew server tick save kore na.
+- Ekshathe onek gula: RDP bachai koro, tarpor **Mark shown as settled** chapo.
+- Bhul tick dile admin abar click kore tick tule dite pare.
+- Admin password e 15 minute e 5 bar bhul dile oi IP 15 minute atke thake.
+- Admin password ar monitor password ek hole server chalu hoy na.
 
 Page protiti 1 minute e nijei refresh hoy. Script protita RDP te 45-90 minute e ekbar data pathay.
 Script shudhu pore: cash-out request ba "Redeem your reward" kokhono chape na, reward er link o pathay na.
@@ -143,7 +156,7 @@ Server e **Node.js** (16 ba notun) lagbe. Kono npm package lage na.
    - **Windows server:** Administrator PowerShell e ei ek line dao (folder `C:\Piper Monitor` dhore). Server Task Scheduler e background e chole, kono window khola rakhte hoy na, login chara-o restart er por chalu hoy:
 
      ```
-     Register-ScheduledTask -TaskName 'Piper Cash-out Monitor' -Action (New-ScheduledTaskAction -Execute (Get-Command node).Source -Argument '"C:\Piper Monitor\server.js" --port 3200 --password tomar-password' -WorkingDirectory 'C:\Piper Monitor') -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)) -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force
+     Register-ScheduledTask -TaskName 'Piper Cash-out Monitor' -Action (New-ScheduledTaskAction -Execute (Get-Command node).Source -Argument '"C:\Piper Monitor\server.js" --port 3200 --password tomar-password --admin-password admin-er-password' -WorkingDirectory 'C:\Piper Monitor') -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)) -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force
      ```
 
      Tarpor `Start-ScheduledTask -TaskName 'Piper Cash-out Monitor'`. `server.js` bodlale age `Stop-ScheduledTask -TaskName 'Piper Cash-out Monitor'`, file bodlao, tarpor abar `Start-ScheduledTask`.
@@ -151,7 +164,7 @@ Server e **Node.js** (16 ba notun) lagbe. Kono npm package lage na.
 
      ```
      npm install -g pm2
-     pm2 start server.js --name piper-cashout -- --port 3200 --password tomar-password
+     pm2 start server.js --name piper-cashout -- --port 3200 --password tomar-password --admin-password admin-er-password
      pm2 save
      ```
 
