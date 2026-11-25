@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Piper Telegram Notifier
 // @namespace    https://github.com/nkorim321-creator/android-apk
-// @version      3.2.0
-// @description  Piper dashboard e notun survey (hit) available hole Telegram e RDP number, title, pay ar time pathay. Je account jar, message tar kache jay. Cash-out hole admin ke janay.
+// @version      3.3.0
+// @description  Piper dashboard e notun survey (hit) available hole Telegram e RDP number, title, pay ar time pathay. Je account jar, message tar kache jay. Cash-out er hisab Google Sheet monitor e pathay.
 // @match        https://www.piperpays.com/*
 // @match        https://piperpays.com/*
 // @run-at       document-idle
@@ -14,6 +14,8 @@
 // @grant        GM_notification
 // @connect      api.telegram.org
 // @connect      api.piperpays.com
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
 // ==/UserScript==
 
 (function () {
@@ -23,7 +25,8 @@
   // Code e kichu bodlate hobe na. Sob kichu Tampermonkey menu theke set hoy:
   //   1. Telegram bot token set koro
   //   2. Account add koro:  PiperNaam,RDP,User,ChatID   jemon  Rhonda,1,Navid,6405530876
-  //   3. Admin chat ID set koro (sob RDP er kaj ar cash-out pabe)
+  //   3. Admin chat ID set koro (sob RDP er kaj pabe)
+  //   💵 Cash-out sheet link set koro (cash-out er alada monitor, Telegram e jay na)
   // Egulo Tampermonkey e save thake, script update korleo muche jay na.
   // ===========================================================================
 
@@ -37,17 +40,18 @@
   const TG_MAX_CHARS = 3500;                              // Telegram er limit 4096, ektu kom rakhi
   const CHAT_ID_RE = /^-?\d{4,}$/;
 
-  // Cash-out tracker: Earnings page er "Cash-outs" list ar balance. Shudhu pore.
+  // Cash-out monitor: Earnings page er "Cash-outs" list ar balance pore Google Sheet e pathay.
   // Cash-out request (POST /payouts) ba "Redeem your reward" script kokhono chape na.
   const PAYOUTS_PATH = '/payouts';
   const BALANCE_PATH = '/earnings/balance';
-  const CASHOUT_GAP_MIN = [45, 90];                       // ei koto minute por por cash-out check
+  const CASHOUT_GAP_MIN = [45, 90];                       // ei koto minute por por sheet e pathay
   const CASHOUT_RETRY_MIN = [10, 15];                     // fail hole abar try
   // Piper site e je lekha dekhay
   const PAYOUT_STATUS = {
     PENDING: 'On its way', PROCESSING: 'On its way', DELIVERED: 'Paid',
     FLAGGED: 'Under review', CANCELED: 'Canceled', FAILED: 'Didn’t go through',
   };
+  const PAYOUT_METHOD = { GIFT_CARD: 'Gift card', CASH: 'PayPal, Venmo or bank' };
 
   const cfg = {
     get botToken() { return GM_getValue('botToken', ''); },
@@ -74,6 +78,9 @@
     get minSec() { return Math.max(30, Number(GM_getValue('minSec', 60)) || 60); },
     get maxSec() { return Math.max(this.minSec, Number(GM_getValue('maxSec', 300)) || 300); },
     get desktopNotify() { return GM_getValue('desktopNotify', true); },
+    // Cash-out monitor: Apps Script er web app link ar password
+    get sheetUrl() { return GM_getValue('sheetUrl', ''); },
+    get sheetKey() { return GM_getValue('sheetKey', ''); },
   };
 
   // ---------------------------------------------------------------------------
@@ -207,13 +214,8 @@
   }
 
   // Ei browser er account er kaj kara pabe: account er user + admin.
-  // Cash-out er khobor shudhu admin pay. Admin set na thakle ei RDP er manush ra pay.
-  function recipients(kind) {
+  function recipients() {
     const byId = new Map();
-    if (kind === 'cash' && cfg.admins.length) {
-      cfg.admins.forEach((id) => byId.set(id, 'Admin'));
-      return { chats: Array.from(byId, ([id, name]) => ({ id, name })), fromOldList: false };
-    }
     account().to.forEach((t) => { if (!byId.has(t.id)) byId.set(t.id, t.user); });
     cfg.admins.forEach((id) => { if (!byId.has(id)) byId.set(id, 'Admin'); });
     let fromOldList = false;
@@ -234,7 +236,8 @@
       + '\n\nAdmin (sob RDP er kaj pay): ' + (cfg.admins.join(', ') || '(keu na)')
       + '\n\nEi browser e login: ' + (cur.name ? cur.name + ' → ' + accountLabel() : '(jana nai)')
       + '\nEr kaj jabe: ' + (r.chats.map(chatLabel).join(', ') || '(karo kache na)')
-      + (r.fromOldList ? '\n(Kono account/admin set nai, tai purono chat list e jacche.)' : '');
+      + (r.fromOldList ? '\n(Kono account/admin set nai, tai purono chat list e jacche.)' : '')
+      + '\n\n' + syncStatusText();
   }
 
   let accountToken = null;
@@ -281,7 +284,7 @@
   // Ekjon er kache fail holeo baki ra pay, ar baki der janano hoy ke pay nai.
   // Kono ekjon er kache-o na gele error dey, jate porer check e abar try kore.
   async function sendTelegram(html, opts) {
-    const chats = recipients(opts && opts.cash ? 'cash' : '').chats;
+    const chats = recipients().chats;
     if (!chats.length) throw new Error('Ei RDP er kaj kauke pathano jacche na. Menu theke "2. Account add koro" ba "3. Admin chat ID set koro".');
     const text = '🖥 <b>' + esc(accountLabel()) + '</b>\n' + html;
     const results = await Promise.allSettled(chats.map((c) => telegram('sendMessage', {
@@ -515,20 +518,19 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Cash-out tracker
-  //   Prothom bar: ei account er puro cash-out list (report) admin ke pathay.
-  //   Tarpor: notun cash-out ba status bodlale (On its way → Paid) janay.
-  //   Ek browser e onno Piper account login korle tar list alada rakhe.
+  // Cash-out monitor (Google Sheet)
+  //   Ei account er cash-out list ar balance Google Sheet e pathay. Telegram e kichu jay na.
+  //   Sheet link set na thakle Piper er cash-out pora-i hoy na.
   // ---------------------------------------------------------------------------
-  const fmtDate = (iso) => {
-    const d = new Date(iso);
-    return isNaN(d) ? '?' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
   const statusText = (s) => PAYOUT_STATUS[s] || String(s || '?');
-  const isPaid = (s) => s === 'DELIVERED';
-  const isComing = (s) => s === 'PENDING' || s === 'PROCESSING' || s === 'FLAGGED';
-  const byDateDesc = (a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0);
-  const plain = (h) => String(h).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  const pad2 = (n) => String(n).padStart(2, '0');
+  // Piper site je tarikh dekhay (ei computer er time zone e), "2026-11-18" hisebe.
+  const localDay = (iso) => {
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  };
+  const SHEET_URL_RE = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+  const monitorLink = () => (cfg.sheetUrl ? cfg.sheetUrl + '?key=' + encodeURIComponent(cfg.sheetKey) : '');
 
   async function fetchCashouts(token) {
     const data = await apiGet(token, PAYOUTS_PATH);
@@ -538,75 +540,71 @@
         id: String(p.id),
         amount: Number(p.amount) || 0,
         status: String(p.status || ''),
-        date: p.deliveredAt || p.createdAt || '',   // site o ei tarikh dekhay
+        statusText: statusText(p.status),
+        method: PAYOUT_METHOD[p.method] || String(p.method || ''),
+        day: localDay(p.deliveredAt || p.createdAt),   // site o ei tarikh dekhay
       }));
     let balance = null;
-    try { balance = await apiGet(token, BALANCE_PATH); } catch (_) { /* balance chara-o report hoy */ }
+    try { balance = await apiGet(token, BALANCE_PATH); } catch (_) { /* balance chara-o pathai */ }
     return { list, balance };
   }
 
-  function cashoutLine(p, oldStatus) {
-    const st = oldStatus && oldStatus !== p.status ? statusText(oldStatus) + ' → ' + statusText(p.status) : statusText(p.status);
-    return `${fmtDate(p.date)}  ·  <b>${money(p.amount)}</b>  ·  ${esc(st)}`;
-  }
-
-  function cashoutTotals(list, balance) {
-    const pick = (f) => list.filter((p) => f(p.status));
-    const sum = (arr) => arr.reduce((t, p) => t + p.amount, 0);
-    const paid = pick(isPaid), coming = pick(isComing);
-    let s = `Mot paid: <b>${money(sum(paid))}</b> (${paid.length} ta)`;
-    if (coming.length) s += `  ·  Ashche: ${money(sum(coming))} (${coming.length} ta)`;
-    if (balance && balance.available != null) {
-      s += `\nBalance: ${money(balance.available)}` + (balance.lifetime != null ? `  ·  Lifetime: ${money(balance.lifetime)}` : '');
-    }
-    return s;
-  }
-
-  function cashoutReport(list, balance) {
-    const sorted = list.slice().sort(byDateDesc);
-    const shown = sorted.slice(0, 40);
-    return '💵 <b>Cash-out report</b>\n'
-      + (shown.length ? shown.map((p) => cashoutLine(p)).join('\n') : 'Ekhono kono cash-out nai.')
-      + (sorted.length > shown.length ? `\n(aro ${sorted.length - shown.length} ta purono)` : '')
-      + '\n\n' + cashoutTotals(list, balance);
-  }
-
-  // report: true hole notun kichu na thakleo puro list pathay (menu theke).
-  async function checkCashouts(token, opts) {
+  async function syncCashouts(token) {
+    if (!cfg.sheetUrl) throw new Error('Cash-out sheet link set kora nai. Menu theke "💵 Cash-out sheet link set koro".');
     const name = GM_getValue('accountName', '');
     if (!name) throw new Error('kon account login seta ekhono jana nai, ektu por abar try koro');
-    const key = norm(name);
     const { list, balance } = await fetchCashouts(token);
-    const store = GM_getValue('cashouts', null) || {};
-    const known = store[key] && store[key].items;
-    let html = null;
-    if ((opts && opts.report) || !known) {
-      // Prothom bar: kono cash-out na thakle chupchap mone rakhi.
-      if ((opts && opts.report) || list.length) html = cashoutReport(list, balance);
-    } else {
-      const fresh = list.filter((p) => !(p.id in known)).sort(byDateDesc);
-      const changed = list.filter((p) => p.id in known && known[p.id] !== p.status).sort(byDateDesc);
-      const parts = [];
-      if (fresh.length) parts.push('💵 <b>Notun cash-out</b>\n' + fresh.map((p) => cashoutLine(p)).join('\n'));
-      if (changed.length) parts.push('💵 <b>Cash-out update</b>\n' + changed.map((p) => cashoutLine(p, known[p.id])).join('\n'));
-      if (parts.length) html = parts.join('\n\n') + '\n\n' + cashoutTotals(list, balance);
+    const row = account().row;
+    const payload = {
+      rdp: row ? rdpText(row.rdp) : 'RDP ??',
+      account: row ? row.name : name,
+      payouts: list,
+      balance: balance ? { available: balance.available, pending: balance.pending, lifetime: balance.lifetime } : null,
+    };
+    const r = await gmRequest({
+      method: 'POST',
+      url: monitorLink(),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      data: JSON.stringify(payload),
+    });
+    let body = null;
+    try { body = JSON.parse(r.responseText); } catch (_) { /* niche dekhi */ }
+    if (body && body.ok) return { list, balance, payload };
+    if (body && body.error) throw new Error('Sheet: ' + body.error);
+    if (/<html|accounts\.google\.com/i.test(r.responseText || '')) {
+      throw new Error('Sheet link e dhukte parchi na. Apps Script deploy e "Who has access: Anyone" dao.');
     }
-    // Telegram e na gele mone rakhi na, porer bar abar try hobe.
-    if (html) await sendTelegram(html, { quiet: true, cash: true });
-    store[key] = { items: Object.fromEntries(list.map((p) => [p.id, p.status])) };
-    GM_setValue('cashouts', store);
-    return { list, balance, html };
+    throw new Error('Sheet theke thik uttor ashe nai (HTTP ' + r.status + ')');
   }
 
-  async function maybeCheckCashouts(token) {
-    if (Date.now() < Number(GM_getValue('cashoutNextAt', 0))) return;
+  async function runSync(token) {
+    try {
+      const r = await syncCashouts(token);
+      GM_setValue('cashoutSync', { at: Date.now(), ok: true, msg: r.list.length + ' ta cash-out' });
+      return r;
+    } catch (e) {
+      GM_setValue('cashoutSync', { at: Date.now(), ok: false, msg: safe(e.message) });
+      throw e;
+    }
+  }
+
+  function syncStatusText() {
+    if (!cfg.sheetUrl) return 'Cash-out sheet: set kora nai';
+    const st = GM_getValue('cashoutSync', null);
+    if (!st) return 'Cash-out sheet: ekhono pathano hoy nai';
+    const t = new Date(st.at).toLocaleString();
+    return st.ok ? 'Cash-out sheet: shesh pathano ' + t + ' (' + st.msg + ')' : 'Cash-out sheet e error (' + t + '): ' + st.msg;
+  }
+
+  // 45-90 minute e ekbar. Error holeo survey alert er kono khoti hoy na, Telegram e o kichu jay na.
+  async function maybeSyncCashouts(token) {
+    if (!cfg.sheetUrl || Date.now() < Number(GM_getValue('cashoutNextAt', 0))) return;
     let ok = false;
     try {
-      await checkCashouts(token, {});
+      await runSync(token);
       ok = true;
     } catch (e) {
-      console.warn('[Piper TG Notifier] cash-out check:', safe(e.message));
-      if (e.code !== 'EXPIRED') reportError('Cash-out check: ' + e.message);
+      console.warn('[Piper TG Notifier] cash-out sheet:', safe(e.message));
     }
     const [a, b] = ok ? CASHOUT_GAP_MIN : CASHOUT_RETRY_MIN;
     GM_setValue('cashoutNextAt', Date.now() + Math.round((a + Math.random() * (b - a)) * 60000));
@@ -708,15 +706,16 @@
         saveSeen(st, list, unsent, source);
       }
 
-      // Cash-out tracker (45-90 minute e ekbar). Er error e survey alert er kono khoti hoy na.
-      if (source === 'API') await maybeCheckCashouts(token);
+      // Cash-out monitor (45-90 minute e ekbar Google Sheet e). Telegram e kichu jay na.
+      if (source === 'API') await maybeSyncCashouts(token);
 
       const time = new Date().toLocaleTimeString();
       status(`${pageLabel()} · watching (${source}) · ${list.length} available · ${fresh.length} pathano · ${time}`);
       return (lastResult = `Account: ${pageLabel()}\n${source} theke ${list.length} ta available survey pawa geche. ${fresh.length} ta notun Telegram e pathano hoyeche.`
         + '\nKaj jay: ' + (recipients().chats.map(chatLabel).join(', ') || '(karo kache na)')
         + (fresh.length === 0 && list.length ? '\n(Egulo age-i pathano hoyeche. Abar pete chaile "Seen list clear koro".)' : '')
-        + (apiError ? '\nAPI error chilo: ' + apiError.message : ''));
+        + (apiError ? '\nAPI error chilo: ' + apiError.message : '')
+        + '\n' + syncStatusText());
     } catch (e) {
       console.error('[Piper TG Notifier]', safe(e.message));
       status('error: ' + e.message, true);
@@ -829,14 +828,48 @@
     prompt('Ei lekha ta copy kore onno RDP er "2. Account add koro" te paste koro:', list.map(accountLine).join('; '));
   });
 
-  GM_registerMenuCommand('💵 Cash-out report pathao', () => {
+  GM_registerMenuCommand('💵 Cash-out sheet link set koro', () => {
+    const v = prompt('Google Apps Script er "Web app" link paste koro (sheshe /exec thake).\n'
+      + 'Cash-out monitor bondho korte khali kore OK chapo.', monitorLink());
+    if (v === null) return;
+    if (!v.trim()) {
+      GM_setValue('sheetUrl', '');
+      GM_setValue('sheetKey', '');
+      alert('Cash-out sheet bondho. Piper er cash-out ar pora hobe na.');
+      return;
+    }
+    const m = v.trim().match(/^([^?#]+)(?:\?([^#]*))?/);
+    const url = m[1];
+    let key = new URLSearchParams(m[2] || '').get('key') || '';
+    if (!SHEET_URL_RE.test(url)) {
+      alert('Link ta thik na. Emon hobe:\nhttps://script.google.com/macros/s/AKfy.../exec');
+      return;
+    }
+    if (!key) {
+      const k = prompt('Apps Script code er upore je PASSWORD diyecho seta lekho:', cfg.sheetKey);
+      if (k === null || !k.trim()) return;
+      key = k.trim();
+    }
+    GM_setValue('sheetUrl', url);
+    GM_setValue('sheetKey', key);
+    GM_setValue('cashoutNextAt', 0);
+    const done = (txt) => prompt(txt + '\n\nMonitor dekhte ei link browser e kholo (bookmark kore rakho):', monitorLink());
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    if (!token) { done('Saved. Piper e login korle cash-out sheet e jabe.'); return; }
+    ensureAccount()
+      .then(() => runSync(token))
+      .then((r) => done('Saved. ' + pageLabel() + ': ' + r.list.length + ' ta cash-out sheet e gese.'))
+      .catch((e) => done('Link saved, kintu pathano jay nai:\n' + safe(e.message)));
+  });
+
+  GM_registerMenuCommand('💵 Cash-out sheet e ekhon pathao', () => {
+    if (!cfg.sheetUrl) { alert('Age "💵 Cash-out sheet link set koro".'); return; }
     const token = localStorage.getItem(ACCESS_TOKEN_KEY);
     if (!token) { alert('Piper e login nai.'); return; }
     ensureAccount()
-      .then(() => checkCashouts(token, { report: true }))
-      .then((r) => alert(pageLabel() + ': cash-out report Telegram e gese ('
-        + (cfg.admins.length ? 'admin' : 'ei RDP er manush') + ').\n\n' + plain(r.html)))
-      .catch((e) => alert('Cash-out report pathano jay nai:\n' + safe(e.message)));
+      .then(() => runSync(token))
+      .then((r) => alert(pageLabel() + ': ' + r.list.length + ' ta cash-out sheet e gese.\n\nMonitor: ' + monitorLink()))
+      .catch((e) => alert('Sheet e pathano jay nai:\n' + safe(e.message)));
   });
 
   GM_registerMenuCommand('🔍 Ekhon check koro', () => {
