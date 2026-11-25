@@ -127,15 +127,23 @@ Server e **Node.js** (16 ba notun) lagbe. Kono npm package lage na.
    ```
 
    `Piper Cash-out Monitor cholche: http://0.0.0.0:3200` dekhale cholche.
-3. Server bondho holeo jeno nijei abar chalu hoy, tai **pm2** diye chalao (Linux ar Windows duitai):
+3. Sob somoy chalu rakho, jate server restart er por o nijei chalu hoy:
+   - **Windows server:** Administrator PowerShell e ei ek line dao (folder `C:\Piper Monitor` dhore). Server Task Scheduler e background e chole, kono window khola rakhte hoy na, login chara-o restart er por chalu hoy:
 
-   ```
-   npm install -g pm2
-   pm2 start server.js --name piper-cashout -- --port 3200 --password tomar-password
-   pm2 save
-   ```
+     ```
+     Register-ScheduledTask -TaskName 'Piper Cash-out Monitor' -Action (New-ScheduledTaskAction -Execute (Get-Command node).Source -Argument '"C:\Piper Monitor\server.js" --port 3200 --password tomar-password' -WorkingDirectory 'C:\Piper Monitor') -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)) -User 'NT AUTHORITY\SYSTEM' -RunLevel Highest -Force
+     ```
 
-   Linux e restart er por o chalu rakhte ekbar `pm2 startup` dao, je command dekhay seta chalao.
+     Tarpor `Start-ScheduledTask -TaskName 'Piper Cash-out Monitor'`. `server.js` bodlale age `Stop-ScheduledTask -TaskName 'Piper Cash-out Monitor'`, file bodlao, tarpor abar `Start-ScheduledTask`.
+   - **Linux server:** pm2 diye chalao:
+
+     ```
+     npm install -g pm2
+     pm2 start server.js --name piper-cashout -- --port 3200 --password tomar-password
+     pm2 save
+     ```
+
+     Restart er por o chalu rakhte ekbar `pm2 startup` dao, je command dekhay seta chalao.
 4. Server er firewall e port ta kholo:
    - Ubuntu: `sudo ufw allow 3200/tcp`
    - Windows: `netsh advfirewall firewall add rule name="Piper Cash-out 3200" dir=in action=allow protocol=TCP localport=3200`

@@ -176,9 +176,10 @@ function fmtDay(day) {
 }
 function agoText(hours) {
   if (!isFinite(hours)) return '–';
-  if (hours < 1) return Math.max(1, Math.round(hours * 60)) + ' min age';
-  if (hours < 48) return Math.round(hours) + ' ghonta age';
-  return Math.round(hours / 24) + ' din age';
+  if (hours < 1) return Math.max(1, Math.round(hours * 60)) + ' min ago';
+  if (hours < 48) { const h = Math.round(hours); return h + (h === 1 ? ' hour ago' : ' hours ago'); }
+  const d = Math.round(hours / 24);
+  return d + (d === 1 ? ' day ago' : ' days ago');
 }
 const rdpNo = (s) => { const m = /(\d+)/.exec(String(s)); return m ? Number(m[1]) : 9999; };
 const sum = (arr) => arr.reduce((t, c) => t + (Number(c.amount) || 0), 0);
@@ -212,8 +213,8 @@ function page(title, body, refresh) {
 }
 
 function loginPage(error) {
-  return page('Piper Cash-out Monitor', `<div class="login"><h1>Piper Cash-out Monitor</h1><p class="muted">Password dao</p>
-<form method="post" action="/login"><input type="password" name="password" autocomplete="current-password" autofocus required aria-label="Password"><button type="submit">Dhuko</button></form>
+  return page('Piper Cash-out Monitor', `<div class="login"><h1>Piper Cash-out Monitor</h1><p class="muted">Enter your password</p>
+<form method="post" action="/login"><input type="password" name="password" autocomplete="current-password" autofocus required aria-label="Password"><button type="submit">Login</button></form>
 ${error ? `<p class="err">${esc(error)}</p>` : ''}</div>`);
 }
 
@@ -232,14 +233,14 @@ function monitorPage() {
   }).sort((x, y) => rdpNo(x.rdp) - rdpNo(y.rdp) || x.account.localeCompare(y.account));
 
   if (!accounts.length) {
-    return page('Piper Cash-out Monitor', `<h1>Piper Cash-out Monitor</h1><p class="muted">Ekhono kono data ashe nai. RDP er Tampermonkey menu theke "💵 Cash-out monitor e ekhon pathao" dao.</p><p><a href="/logout">Logout</a></p>`, true);
+    return page('Piper Cash-out Monitor', `<h1>Piper Cash-out Monitor</h1><p class="muted">No data yet. On an RDP, open the Tampermonkey menu and click "💵 Cash-out monitor e ekhon pathao".</p><p><a href="/logout">Logout</a></p>`, true);
   }
 
   const tot = (f) => accounts.reduce((t, a) => t + (Number(a[f]) || 0), 0);
   const cards = [
-    ['Mot paid (sob ID)', money(tot('paidSum')), tot('paidN') + ' ta cash-out'],
-    ['Ashche', money(tot('comingSum')), 'On its way / review'],
-    ['Balance (sob ID)', money(tot('balance')), accounts.length + ' ta ID'],
+    ['Total paid (all accounts)', money(tot('paidSum')), tot('paidN') + (tot('paidN') === 1 ? ' cash-out' : ' cash-outs')],
+    ['On the way', money(tot('comingSum')), 'On its way / under review'],
+    ['Balance (all accounts)', money(tot('balance')), accounts.length + (accounts.length === 1 ? ' account' : ' accounts')],
   ].map((c) => `<div class="card"><div class="label">${c[0]}</div><div class="big">${c[1]}</div><div class="muted">${c[2]}</div></div>`).join('');
 
   const idRows = accounts.map((a) => {
@@ -269,13 +270,13 @@ function monitorPage() {
     + `<td class="num">${money(c.amount)}</td><td><span class="pill ${pillClass(c.status)}">${esc(c.statusText)}</span></td></tr>`).join('');
 
   const body = `
-<div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">Protiti 1 minute e nijei refresh hoy</p></div><a class="muted" href="/logout">Logout</a></div>
+<div class="top"><div><h1>Piper Cash-out Monitor</h1><p class="muted">Refreshes automatically every minute</p></div><a class="muted" href="/logout">Logout</a></div>
 <section class="cards">${cards}</section>
-<h2>ID onujayi</h2>
-<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">Mot paid</th><th class="num">Koyta</th><th class="num">Ashche</th><th class="num">Balance</th><th class="num">Lifetime</th><th>Shesh cash-out</th><th>Shesh sync</th></tr></thead><tbody>${idRows}</tbody></table></div>
-${monthRows ? `<h2>Mash onujayi (Paid)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Mash</th><th class="num">Dollar</th><th class="num">Koyta</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
-<div class="row"><h2>Sob cash-out</h2><select id="f" aria-label="RDP"><option value="">Sob RDP</option>${options}</select></div>
-<div class="wrap"><table id="list"><thead><tr><th>Tarikh</th><th>RDP</th><th>Account</th><th class="num">Dollar</th><th>Status</th></tr></thead><tbody>${cashRows || '<tr><td colspan="5" class="muted">Ekhono kono cash-out nai</td></tr>'}</tbody></table></div>
+<h2>By account</h2>
+<div class="wrap"><table><thead><tr><th>RDP</th><th>Account</th><th class="num">Total paid</th><th class="num">Count</th><th class="num">On the way</th><th class="num">Balance</th><th class="num">Lifetime</th><th>Last cash-out</th><th>Last sync</th></tr></thead><tbody>${idRows}</tbody></table></div>
+${monthRows ? `<h2>By month (paid)</h2><div class="wrap fit"><table class="narrow"><thead><tr><th>Month</th><th class="num">Amount</th><th class="num">Count</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : ''}
+<div class="row"><h2>All cash-outs</h2><select id="f" aria-label="RDP"><option value="">All RDPs</option>${options}</select></div>
+<div class="wrap"><table id="list"><thead><tr><th>Date</th><th>RDP</th><th>Account</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>${cashRows || '<tr><td colspan="5" class="muted">No cash-outs yet</td></tr>'}</tbody></table></div>
 <script>
 (function () {
   var f = document.getElementById('f');
@@ -315,9 +316,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/login') {
-      if (blocked(ip)) return send(res, 429, loginPage('Onekbar bhul password. 15 minute por try koro.'));
+      if (blocked(ip)) return send(res, 429, loginPage('Too many wrong attempts. Try again in 15 minutes.'));
       const pw = new URLSearchParams(await readBody(req)).get('password') || '';
-      if (!keyOk(pw)) { failed(ip); return send(res, 401, loginPage('Password bhul')); }
+      if (!keyOk(pw)) { failed(ip); return send(res, 401, loginPage('Wrong password')); }
       return send(res, 303, '', 'text/plain', { Location: '/', 'Set-Cookie': loginCookie() });
     }
 
@@ -328,10 +329,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/') {
       // http://server:port/?key=password link o chole
       if (url.searchParams.has('key')) {
-        if (blocked(ip)) return send(res, 429, loginPage('Onekbar bhul password. 15 minute por try koro.'));
+        if (blocked(ip)) return send(res, 429, loginPage('Too many wrong attempts. Try again in 15 minutes.'));
         if (keyOk(url.searchParams.get('key'))) return send(res, 303, '', 'text/plain', { Location: '/', 'Set-Cookie': loginCookie() });
         failed(ip);
-        return send(res, 401, loginPage('Password bhul'));
+        return send(res, 401, loginPage('Wrong password'));
       }
       if (!cookieOk(req)) return send(res, 200, loginPage(''));
       return send(res, 200, monitorPage());
