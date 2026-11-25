@@ -233,7 +233,7 @@ function monitorPage() {
   }).sort((x, y) => rdpNo(x.rdp) - rdpNo(y.rdp) || x.account.localeCompare(y.account));
 
   if (!accounts.length) {
-    return page('Piper Cash-out Monitor', `<h1>Piper Cash-out Monitor</h1><p class="muted">No data yet. On an RDP, open the Tampermonkey menu and click "💵 Cash-out monitor e ekhon pathao".</p><p><a href="/logout">Logout</a></p>`, true);
+    return page('Piper Cash-out Monitor', `<h1>Piper Cash-out Monitor</h1><p class="muted">No data yet. On each RDP, open piperpays.com, open the userscript menu (Tampermonkey or Violentmonkey) and click "💵 Cash-out monitor link set koro". Enter this server's address and password.</p><p><a href="/logout">Logout</a></p>`, true);
   }
 
   const tot = (f) => accounts.reduce((t, a) => t + (Number(a[f]) || 0), 0);
